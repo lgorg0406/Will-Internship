@@ -46,14 +46,31 @@ while (i < nrow(raw_matrix)) {
   }
 }
 ```
-
 ```{r}
-# Convert list to 3D array (p x k x n)
-coords_array <- array(NA, dim = c(21, 2, length(landmark_list)))
-for (j in 1:length(landmark_list)) {
+# Remove landmark 14 (and 21 if desired) from every specimen
+landmark_list <- lapply(landmark_list, function(m) {
+  m <- m[-21, , drop = FALSE]   # remove LM21
+  m <- m[-14, , drop = FALSE] # remove LM14
+  return(m)
+})
+```
+```{r}
+# Rebuild array with updated number of landmarks
+n_landmarks <- nrow(landmark_list[[1]])
+coords_array <- array(NA, dim = c(n_landmarks, 2, length(landmark_list)))
+```
+```{r}
+for (j in seq_along(landmark_list)) {
   coords_array[,,j] <- landmark_list[[j]]
 }
+```
+```{r}
+# Check
+dim(coords_array)
 
+```
+
+```{r}
 # Group by
 group <- as.factor(c(
   "Ardipithecus",
@@ -190,6 +207,32 @@ summary(pca)
 #Scree plot
 plot(pca)
 ```
+#Allometry Adjusted PCA
+```{r}
+# --- GPA ---
+gpa <- gpagen(coords_flipped, print.progress = FALSE)
+
+Y     <- gpa$coords            # p x k x n (Procrustes shape coordinates)
+CS    <- gpa$Csize             # length n
+logCS <- log(CS)
+
+# --- Remove allometry: regress shape on log(CS) ---
+fit_allom <- procD.lm(Y ~ logCS, iter = 999)
+
+# Residuals come back as a 2D matrix (n x (p*k)) for procD.lm
+res_mat <- residuals(fit_allom)
+
+# Convert residual matrix back to p x k x n array
+Y_res <- arrayspecs(res_mat, p = dim(Y)[1], k = dim(Y)[2])
+
+# --- PCA on size-corrected (residual) shapes ---
+flat_res <- two.d.array(Y_res)
+pca <- prcomp(flat_res, center = TRUE, scale. = TRUE)
+
+# PCA summary / scree
+summary(pca)
+plot(pca)
+```
 
 #PCA to Dataframe for Plot
 
@@ -213,6 +256,7 @@ pca_df$ID <- ids
 ```
 
 ```{r}
+###FOR OLD PLOT WITH ELIPSE
 # Clean the PCA data
 pca_df <- pca_df %>%
   filter(!is.na(Group), !is.na(PC1), !is.na(PC2)) %>%
@@ -229,31 +273,205 @@ nonsingleton_df <- pca_df %>%
   filter(!(ID %in% singleton_df$ID))
 ```
 
+#Allometry Adjusted PCA Dataframe
+```{r}
+pca_df <- data.frame(pca$x, Group = group, CS = CS, logCS = logCS)
+
+# Extract IMAGE= lines from raw data
+ids <- c()
+for (i in 1:nrow(raw_data)) {
+  val <- raw_data[i, 1]
+  if (!is.na(val) && str_starts(as.character(val), "IMAGE=")) {
+    id <- str_remove(as.character(val), "IMAGE=")
+    ids <- c(ids, id)
+  }
+}
+pca_df$ID <- ids
+```
+
+#Theme help
+```{r}
+major_groups <- c("Gorilla","Pan","Pongo","Mandrillus","Hylobates","Homo sapiens")
+
+# Collapsing groups + special Ardi handling
+prep_plot_df <- function(df, xcol, ycol) {
+
+  df <- df %>%
+    mutate(
+      # Make Ardi label consistent
+      ID = ifelse(grepl("Ardi\\.png", ID, fixed = FALSE), "Ardi", ID),
+
+      # Collapse non-major taxa into "Other"
+      PlotGroup = ifelse(Group %in% major_groups, as.character(Group), "Other"),
+
+      # Mark Ardi for special styling
+      is_Ardi = (ID == "Ardi")
+    )
+
+  # Hulls only for major groups (and only if >= 3 points)
+  hull_df <- df %>%
+    filter(PlotGroup %in% major_groups) %>%
+    group_by(PlotGroup) %>%
+    filter(n() >= 3) %>%
+    slice(chull(.data[[xcol]], .data[[ycol]])) %>%
+    ungroup()
+
+  # Label everything NOT in major groups, plus Ardi (even if it is)
+  label_df <- df %>%
+    filter(PlotGroup == "Other" | is_Ardi)
+
+  list(df = df, hull_df = hull_df, label_df = label_df)
+}
+
+# Colorblind-friendly, distinct major colors + one color for Other + one for Ardi
+col_map <- c(
+  "Gorilla"     = "#0072B2",  # blue
+  "Pan"         = "#009E73",  # green
+  "Pongo"       = "#E69F00",  # orange
+  "Mandrillus"  = "#CC79A7",  # purple
+  "Hylobates"   = "#56B4E9",  # light blue
+  "Homo sapiens"= "#D55E00",  # vermillion
+  "Other"       = "grey40"
+)
+
+# Point shapes (Ardi distinct)
+shape_map <- c(
+  "Major" = 16,  # filled circle
+  "Other" = 1,   # open circle
+  "Ardi"  = 17   # triangle
+)
+```
+
 #Plot PCA
 
 ```{r}
+pp <- prep_plot_df(pca_df, xcol = "PC1", ycol = "PC2")
+
+ggplot(pp$df, aes(x = PC1, y = PC2)) +
+  # Closed convex hulls for major groups
+  geom_polygon(
+    data = pp$hull_df,
+    aes(group = PlotGroup, fill = PlotGroup, color = PlotGroup),
+    alpha = 0.12,
+    linewidth = 0.9
+  ) +
+
+  # Points: major vs other + special Ardi
+  geom_point(
+    aes(
+      color = PlotGroup,
+      shape = dplyr::case_when(
+        is_Ardi ~ "Ardi",
+        PlotGroup == "Other" ~ "Other",
+        TRUE ~ "Major"
+      )
+    ),
+    size = 2.4,
+    alpha = 0.9,
+    stroke = 1
+  ) +
+
+  # Labels: Other + Ardi
+  geom_text_repel(
+    data = pp$label_df,
+    aes(label = ID),
+    color = "black",
+    size = 3.2,
+    max.overlaps = Inf,
+    box.padding = 0.35,
+    point.padding = 0.2,
+    min.segment.length = 0
+  ) +
+
+  scale_color_manual(values = col_map) +
+  scale_fill_manual(values = col_map) +
+  scale_shape_manual(values = shape_map) +
+
+  labs(
+    title = "Allometry-adjusted PCA: PC1 vs PC2",
+    x = "PC1 (allometry-adjusted)",
+    y = "PC2 (allometry-adjusted)"
+  ) +
+  theme_bw() +
+  theme(legend.title = element_blank())
+```
+```{r}
+###OLD PLOT WITH ELIPSE
 # Plot
 ggplot() +
   # Non-singletons and Ardipithecus: group-colored
-  geom_point(data = nonsingleton_df, aes(x = PC1, y = PC3, color = Group), size = 2, alpha = 0.85) +
+  geom_point(data = nonsingleton_df, aes(x = PC1, y = PC2, color = Group), size = 2, alpha = 0.85) +
 
   # Ellipses only for groups with >1 specimen
-  stat_ellipse(data = nonsingleton_df, aes(x = PC1, y = PC3, group = Group, color = Group),
+  stat_ellipse(data = nonsingleton_df, aes(x = PC1, y = PC2, group = Group, color = Group),
                type = "norm", linetype = "solid", linewidth = 1, alpha = 0.8) +
 
   # Singleton specimens (excluding Ardipithecus): black X
-  geom_point(data = singleton_df, aes(x = PC1, y = PC3), color = "black", shape = 4, size = 3, stroke = 1.2) +
+  geom_point(data = singleton_df, aes(x = PC1, y = PC2), color = "black", shape = 4, size = 3, stroke = 1.2) +
 
   # Label Ardipithecus (bold)
-  geom_text_repel(data = filter(pca_df, Group == "Ardipithecus"), aes(x = PC1, y = PC3, label = ID), color = "red", fontface = "bold", size = 4) +
+  geom_text_repel(data = filter(pca_df, Group == "Ardipithecus"), aes(x = PC1, y = PC2, label = ID), color = "red", fontface = "bold", size = 4) +
 
   # Label remaining singletons (italic)
   geom_text_repel(data = singleton_df,
-                  aes(x = PC1, y = PC3, label = ID),
+                  aes(x = PC1, y = PC2, label = ID),
                   color = "black", fontface = "italic", size = 3.5) +
 
   labs(title = "PCA of Talus Shape (Singletons Highlighted, Ardipithecus Labeled)",
-       x = "PC1", y = "PC3") +
+       x = "PC1", y = "PC2") +
+  theme_bw() +
+  theme(legend.title = element_blank())
+```
+
+#Allometry PCA
+```{r}
+pp <- prep_plot_df(pca_df, xcol = "PC1", ycol = "PC2")
+
+ggplot(pp$df, aes(x = PC1, y = PC2)) +
+  # Closed convex hulls for major groups
+  geom_polygon(
+    data = pp$hull_df,
+    aes(group = PlotGroup, fill = PlotGroup, color = PlotGroup),
+    alpha = 0.12,
+    linewidth = 0.9
+  ) +
+
+  # Points: major vs other + special Ardi
+  geom_point(
+    aes(
+      color = PlotGroup,
+      shape = dplyr::case_when(
+        is_Ardi ~ "Ardi",
+        PlotGroup == "Other" ~ "Other",
+        TRUE ~ "Major"
+      )
+    ),
+    size = 2.4,
+    alpha = 0.9,
+    stroke = 1
+  ) +
+
+  # Labels: Other + Ardi
+  geom_text_repel(
+    data = pp$label_df,
+    aes(label = ID),
+    color = "black",
+    size = 3.2,
+    max.overlaps = Inf,
+    box.padding = 0.35,
+    point.padding = 0.2,
+    min.segment.length = 0
+  ) +
+
+  scale_color_manual(values = col_map) +
+  scale_fill_manual(values = col_map) +
+  scale_shape_manual(values = shape_map) +
+
+  labs(
+    title = "Allometry-adjusted PCA: PC1 vs PC2",
+    x = "PC1 (allometry-adjusted)",
+    y = "PC2 (allometry-adjusted)"
+  ) +
   theme_bw() +
   theme(legend.title = element_blank())
 ```
@@ -306,7 +524,107 @@ predictions <- pca_df %>%
 
 print(predictions)
 ```
+#Allometry Adjusted DFA
+```{r}
+# ================= Predict fossil group membership (allometry-adjusted LDA) =================
+library(geomorph)
+library(MASS)
+library(dplyr)
 
+# Assumes you already have:
+#   coords_flipped : p x k x n array (aligned sides, landmarks removed as desired)
+#   group          : factor length n (your original Group labels)
+#   pca_df$ID      : specimen IDs (same order as coords_flipped / group)
+
+# ---- define extant training groups (the reference classes you want fossils assigned to) ----
+train_groups <- c("Gorilla","Pan","Pongo","Mandrillus","Hylobates","Homo sapiens")
+
+# ---- define which specimens are fossils ----
+# Option A (recommended): fossils are anything NOT in the extant training groups
+# (this will include Ardipithecus + named fossils like AL288.1, LB1, etc.)
+is_fossil <- !(as.character(group) %in% train_groups)
+
+# If you want to be explicit instead, uncomment and list fossil groups:
+# fossil_groups <- c("Ardipithecus","LB1","AL288.1","AL333-147","STW 88","KNM-ER 1464",
+#                    "KNM-ER 1476","Littlefoot","MH2","OH8","Omo")
+# is_fossil <- as.character(group) %in% fossil_groups
+
+# ---- 1) GPA ----
+gpa <- gpagen(coords_flipped, print.progress = FALSE)
+Y     <- gpa$coords
+CS    <- gpa$Csize
+logCS <- log(CS)
+
+# ---- 2) Remove allometry (shape ~ logCS) ----
+fit_allom <- procD.lm(Y ~ logCS, iter = 999)
+Y_res <- arrayspecs(residuals(fit_allom), p = dim(Y)[1], k = dim(Y)[2])
+
+# ---- 3) PCA on residual shapes (use PC scores as LDA features) ----
+pca_adj <- prcomp(two.d.array(Y_res), center = TRUE, scale. = TRUE)
+
+# ---- 4) Choose number of PCs safely (avoid p >> n, and keep at least 2 for LD1/LD2) ----
+var_explained <- cumsum(pca_adj$sdev^2) / sum(pca_adj$sdev^2)
+npc_95 <- which(var_explained >= 0.95)[1]
+
+n_train <- sum(!is_fossil & (as.character(group) %in% train_groups))
+g_train <- length(unique(as.character(group)[!is_fossil & (as.character(group) %in% train_groups)]))
+
+npc_max <- max(2, n_train - g_train - 1)
+npc <- min(npc_95, 10, npc_max)
+npc <- max(npc, 2)
+
+pc_all <- as.data.frame(pca_adj$x[, 1:npc, drop = FALSE])
+pc_all$Group <- as.factor(group)
+
+# ---- 5) Fit LDA on extant training set only ----
+train_idx <- (!is_fossil) & (as.character(group) %in% train_groups)
+test_idx  <- is_fossil
+
+train_df <- pc_all[train_idx, , drop = FALSE]
+train_df$Group <- droplevels(as.factor(as.character(train_df$Group)))
+
+test_df <- pc_all[test_idx, setdiff(names(train_df), "Group"), drop = FALSE]
+
+lda_fit <- lda(Group ~ ., data = train_df)
+
+# ---- 6) Predict fossils: class + posterior probabilities ----
+pred <- predict(lda_fit, newdata = test_df)
+
+fossil_pred_df <- data.frame(
+  ID            = pca_df$ID[test_idx],
+  OriginalGroup = as.character(group[test_idx]),
+  PredictedGroup = as.character(pred$class),
+  stringsAsFactors = FALSE
+)
+
+post <- as.data.frame(pred$posterior)
+colnames(post) <- paste0("post_", colnames(post))
+fossil_pred_df <- cbind(fossil_pred_df, post)
+
+# ---- 7) (Optional) add a "max posterior" confidence column ----
+fossil_pred_df$max_posterior <- apply(pred$posterior, 1, max)
+
+# ---- output ----
+fossil_pred_df <- fossil_pred_df %>%
+  arrange(desc(max_posterior))
+
+print(fossil_pred_df)
+
+# If you want to save:
+# write.csv(fossil_pred_df, "fossil_group_predictions_allometry_adjusted_LDA.csv", row.names = FALSE)
+
+
+```
+
+```{r}
+summary(fit_allom)  # procD.lm output (permutation-based)
+
+plot(pca$x[,1], logCS,
+     xlab = "PC1 (raw shape)",
+     ylab = "log centroid size") +
+abline(lm(logCS ~ pca$x[,1]))
+
+```
 #Plot DFA
 
 ```{r}
@@ -362,7 +680,120 @@ ggplot(dfa_plot_df, aes(x = LD1, y = LD2, color = Group, shape = PredictionType)
   theme(legend.title = element_blank())
 
 ```
+#Plot Allometry DFA
+```{r}
+# ================= Plot allometry-adjusted LDA (ggplot) with our styling rules =================
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
 
+# Assumes you already ran the prediction chunk and have:
+#   lda_fit, pc_all, train_idx, test_idx, pca_df$ID, group
+# and you have:
+#   pred <- predict(lda_fit, newdata = test_df)  OR you can re-run predict below
+
+# ---- get LDA scores for ALL specimens (train + fossils) ----
+# Build the feature matrix (same PCs used in training, without Group col)
+pc_feats <- pc_all[, setdiff(names(pc_all), "Group"), drop = FALSE]
+
+lda_scores_all <- as.data.frame(predict(lda_fit, newdata = pc_feats)$x)
+
+lda_plot_df <- data.frame(
+  ID    = pca_df$ID,
+  Group = as.factor(group),
+  LD1   = lda_scores_all$LD1,
+  LD2   = lda_scores_all$LD2,
+  stringsAsFactors = FALSE
+)
+
+# ---- styling rules ----
+major_groups <- c("Gorilla","Pan","Pongo","Mandrillus","Hylobates","Homo sapiens")
+
+col_map <- c(
+  "Gorilla"      = "#0072B2",
+  "Pan"          = "#009E73",
+  "Pongo"        = "#E69F00",
+  "Mandrillus"   = "#CC79A7",
+  "Hylobates"    = "#56B4E9",
+  "Homo sapiens" = "#D55E00",
+  "Other"        = "grey40",
+  "Ardi"         = "#000000"
+)
+
+shape_map <- c(
+  "Major" = 16,  # filled circle
+  "Other" = 1,   # open circle
+  "Ardi"  = 17   # triangle
+)
+
+# ---- collapse to PlotGroup + mark Ardi + define what gets labeled ----
+lda_plot_df <- lda_plot_df %>%
+  mutate(
+    ID = ifelse(grepl("Ardi\\.png", ID), "Ardi", ID),
+    PlotGroup = ifelse(as.character(Group) %in% major_groups, as.character(Group), "Other"),
+    is_Ardi = (ID == "Ardi"),
+    ShapeClass = case_when(
+      is_Ardi ~ "Ardi",
+      PlotGroup == "Other" ~ "Other",
+      TRUE ~ "Major"
+    ),
+    ColorClass = ifelse(is_Ardi, "Ardi", PlotGroup)
+  )
+
+# ---- convex hulls for major groups (closed automatically) ----
+hull_df <- lda_plot_df %>%
+  filter(PlotGroup %in% major_groups) %>%
+  group_by(PlotGroup) %>%
+  filter(n() >= 3) %>%
+  slice(chull(LD1, LD2)) %>%
+  ungroup()
+
+# ---- label everything not in major groups + Ardi ----
+label_df <- lda_plot_df %>%
+  filter(PlotGroup == "Other" | is_Ardi)
+
+# ---- plot ----
+ggplot(lda_plot_df, aes(x = LD1, y = LD2)) +
+
+  # Convex hulls (FIX: explicitly give x and y)
+  geom_polygon(
+    data = hull_df,
+    aes(x = LD1, y = LD2, group = PlotGroup, fill = PlotGroup, color = PlotGroup),
+    alpha = 0.12,
+    linewidth = 0.9
+  ) +
+
+  geom_point(
+    aes(color = ColorClass, shape = ShapeClass),
+    size = 2.4,
+    alpha = 0.9,
+    stroke = 1
+  ) +
+
+  geom_text_repel(
+    data = label_df,
+    aes(x = LD1, y = LD2, label = ID),
+    color = "black",
+    size = 3.2,
+    max.overlaps = Inf,
+    box.padding = 0.35,
+    point.padding = 0.2,
+    min.segment.length = 0
+  ) +
+
+  scale_color_manual(values = col_map, breaks = c(major_groups, "Other", "Ardi")) +
+  scale_fill_manual(values = col_map, breaks = major_groups) +
+  scale_shape_manual(values = shape_map, breaks = c("Major","Other","Ardi")) +
+
+  labs(
+    title = "Allometry-adjusted LDA (LD1 vs LD2)",
+    x = "LD1",
+    y = "LD2"
+  ) +
+  theme_bw() +
+  theme(legend.title = element_blank())
+
+```
 #View Landmarks in a plot
 
 ```{r}
@@ -496,6 +927,7 @@ connections <- matrix(c(
   6,7,
   7,8,
   8,9,
+  8,1,
   9,1,
   9,2,
   9,3,
@@ -506,23 +938,18 @@ connections <- matrix(c(
   2,10,
   10,11,
   11,4,
-  1,8,
   8,12,
   12,13,
-  13,14,
-  14,7,
   13,6,
-  1,15,
+  1,14,
+  14,15,
   15,16,
   16,17,
-  17,18,
-  18,21,
-  4,19,
-  19,5,
-  5,20,
-  20,6,
-  1,5,
-  15,18), ncol = 2, byrow = TRUE)
+  4,18,
+  18,5,
+  5,19,
+  19,6,
+  14,17), ncol = 2, byrow = TRUE)
 
 # Step 3: Plot wireframe comparison
 plotRefToTarget(M1 = specimen_low_pc1,
@@ -651,6 +1078,8 @@ landmark_loadings <- data.frame(
 # Step 3: View or export the result
 print(landmark_loadings)
 ```
+
+#Quadrant PC Wireframes
 ```{r}
 library(grid)
 library(png)
@@ -790,7 +1219,8 @@ par(op)
 library(ggplot2)
 library(grid)
 library(png)
-
+```
+```{r}
 # ---- helper: turn a single-shape wireframe into a grob (PNG) ----
 wireframe_grob <- function(shape, links, file = tempfile(fileext = ".png"),
                            width_px = 600, height_px = 600, res = 160) {
@@ -814,28 +1244,44 @@ g_pc1_max <- wireframe_grob(shape_pc1_max, connections)
 g_pc2_min <- wireframe_grob(shape_pc2_min, connections)
 g_pc2_max <- wireframe_grob(shape_pc2_max, connections)
 
+# ---- convex hulls for selected groups ----
+hull_df <- nonsingleton_df %>%
+  dplyr::filter(Group %in% hull_groups) %>%
+  dplyr::group_by(Group) %>%
+  dplyr::slice(chull(PC1, PC2)) %>%
+  dplyr::slice(c(1:n(), 1)) %>%   # <-- closes the polygon
+  dplyr::ungroup()
+
+
 # ---- base PC1 vs PC2 plot ----
 p <- ggplot() +
   # Non-singletons and Ardipithecus: group-colored
-  geom_point(data = nonsingleton_df, aes(x = PC1, y = PC3, color = Group), size = 2, alpha = 0.85) +
-
-  # Ellipses only for groups with >1 specimen
-  stat_ellipse(data = nonsingleton_df, aes(x = PC1, y = PC3, group = Group, color = Group),
-               type = "norm", linetype = "solid", linewidth = 1, alpha = 0.8) +
-
+  geom_point(data = nonsingleton_df, aes(x = PC1, y = PC2, color = Group), size = 2, alpha = 0.85) +
+  # Convex hulls (filled + outline) for selected groups
+  geom_polygon(
+    data = hull_df,
+    aes(x = PC1, y = PC2, group = Group, fill = Group),
+    alpha = 0.15,
+    color = NA
+  ) +
+  geom_path(
+    data = hull_df,
+    aes(x = PC1, y = PC2, group = Group, color = Group),
+    linewidth = 0.9
+  ) +
   # Singleton specimens (excluding Ardipithecus): black X
-  geom_point(data = singleton_df, aes(x = PC1, y = PC3), color = "black", shape = 4, size = 3, stroke = 1.2) +
+  geom_point(data = singleton_df, aes(x = PC1, y = PC2), color = "black", shape = 4, size = 3, stroke = 1.2) +
 
   # Label Ardipithecus (bold)
-  geom_text_repel(data = filter(pca_df, Group == "Ardipithecus"), aes(x = PC1, y = PC3, label = ID), color = "red", fontface = "bold", size = 4) +
+  geom_text_repel(data = filter(pca_df, Group == "Ardipithecus"), aes(x = PC1, y = PC2, label = ID), color = "red", fontface = "bold", size = 4) +
 
   # Label remaining singletons (italic)
   geom_text_repel(data = singleton_df,
-                  aes(x = PC1, y = PC3, label = ID),
+                  aes(x = PC1, y = PC2, label = ID),
                   color = "black", fontface = "italic", size = 3.5) +
 
   labs(title = "PCA of Talus Shape (Singletons Highlighted, Ardipithecus Labeled)",
-       x = "PC1", y = "PC3") +
+       x = "PC1", y = "PC2") +
   theme_bw() +
   theme(legend.title = element_blank())
 
@@ -846,11 +1292,11 @@ y_rng <- range(pca_df$PC2, na.rm = TRUE)
 dx <- diff(x_rng)
 dy <- diff(y_rng)
 
-pad_x <- dx * 0.03
-pad_y <- dy * 0.03
+pad_x <- dx * .8
+pad_y <- dy * .75
 
-box_w <- dx * 0.22   # size of inset boxes (tweak)
-box_h <- dy * 0.22
+box_w <- dx * 0.3   # size of inset boxes (tweak)
+box_h <- dy * 0.3
 
 # Corners (xmin/xmax/ymin/ymax) for each inset
 # Top-left    = PC1 min / PC2 max
