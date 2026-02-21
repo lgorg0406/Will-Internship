@@ -1,0 +1,1339 @@
+---
+title: "TPS Test"
+format: pdf
+editor: visual
+---
+
+```{r}
+# Load libraries
+library(geomorph)
+library(readxl)
+library(ggplot2)
+library(ggforce)
+library(ggrepel)
+library(tidyverse)
+palette("Okabe-Ito")
+```
+
+```{r}
+# Read Excel file (adjust path if needed)
+file_path <- "TPS combined.xlsx"
+raw_data <- read_excel(file_path, sheet = "Sheet1", col_names = FALSE,na = "empty")
+head(raw_data)
+# Convert to matrix for easier processing
+raw_matrix <- as.matrix(raw_data)
+```
+
+```{r}
+# Initialize list to store each specimen's landmark matrix
+landmark_list <- list()
+i <- 1
+specimen_counter <- 1
+
+while (i < nrow(raw_matrix)) {
+  if (!is.na(as.numeric(raw_matrix[i, 1]))) {
+    # Attempt to extract 21 rows of coordinates
+    block <- raw_matrix[i:(i+20), 1:2]
+    if (all(!is.na(block))) {
+      landmark_list[[specimen_counter]] <- as.matrix(apply(block, 2, as.numeric))
+      specimen_counter <- specimen_counter + 1
+      i <- i + 25  # Skip landmark rows + metadata + blank line
+    } else {
+      i <- i + 1
+    }
+  } else {
+    i <- i + 1
+  }
+}
+```
+```{r}
+# Remove landmark 14 (and 21 if desired) from every specimen
+landmark_list <- lapply(landmark_list, function(m) {
+  m <- m[-21, , drop = FALSE]   # remove LM21
+  m <- m[-14, , drop = FALSE] # remove LM14
+  return(m)
+})
+```
+```{r}
+# Rebuild array with updated number of landmarks
+n_landmarks <- nrow(landmark_list[[1]])
+coords_array <- array(NA, dim = c(n_landmarks, 2, length(landmark_list)))
+```
+```{r}
+for (j in seq_along(landmark_list)) {
+  coords_array[,,j] <- landmark_list[[j]]
+}
+```
+```{r}
+# Check
+dim(coords_array)
+
+```
+
+```{r}
+# Group by
+group <- as.factor(c(
+  "Ardipithecus",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Gorilla",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pan",
+  "Pongo",
+  "Pongo",
+  "Pongo",
+  "Pongo",
+  "Pongo",
+  "Pongo",
+  "Pongo",
+  "Pongo",
+  "Pongo",
+  "Pongo",
+  "Pongo",
+  "Pongo",
+  "Pongo",
+  "Pongo",
+  "Pongo",
+  "Pongo",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Homo sapiens",
+  "Hylobates",
+  "Hylobates",
+  "Hylobates",
+  "Hylobates",
+  "Hylobates",
+  "Hylobates",
+  "Mandrillus",
+  "Mandrillus",
+  "Mandrillus",
+  "Mandrillus",
+  "Mandrillus",
+  "Mandrillus",
+  "Mandrillus",
+  "Mandrillus",
+  "LB1",
+  "AL288.1",
+  "AL333-147",
+  "STW 88",
+  "KNM-ER 1464",
+  "KNM-ER 1476",
+  "Littlefoot",
+  "MH2",
+  "OH8",
+  "Omo"
+))
+
+#Create Side Vector
+side_vector <- c("L","L","R","L","L","L","L","L","L","L","L","L","L","R","L","R","L","L","L","R","R","R","R","L","L","L","R","L","L","R","L","L","L","L","L","L","R","L","L","L","R","R","L","L","L","R","R","R","R","R","R","R","L","R","L","L","R","R","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","R","R","L","L","R","L","L","R","L","L","R","R","L","L","R","R","R","R","L","L","R","L","R")
+
+
+# Flip right-sided specimens (reflect X coordinates)
+coords_flipped <- coords_array  # make a copy to modify
+for (i in 1:dim(coords_array)[3]) {
+  if (side_vector[i] == "R") {
+    coords_flipped[,1,i] <- -coords_array[,1,i]  # Flip X only
+  }
+}
+# Now coords_flipped has all shapes oriented as left-sided
+```
+
+#PCA
+
+```{r}
+# Run GPA and PCA on flipped data
+gpa <- gpagen(coords_flipped)
+flat_coords <- two.d.array(gpa$coords)
+pca <- prcomp(flat_coords, scale. = TRUE)
+
+#PCA Summary
+summary(pca)
+#Scree plot
+plot(pca)
+```
+#Allometry Adjusted PCA
+```{r}
+# --- GPA ---
+gpa <- gpagen(coords_flipped, print.progress = FALSE)
+
+Y     <- gpa$coords            # p x k x n (Procrustes shape coordinates)
+CS    <- gpa$Csize             # length n
+logCS <- log(CS)
+
+# --- Remove allometry: regress shape on log(CS) ---
+fit_allom <- procD.lm(Y ~ logCS, iter = 999)
+
+# Residuals come back as a 2D matrix (n x (p*k)) for procD.lm
+res_mat <- residuals(fit_allom)
+
+# Convert residual matrix back to p x k x n array
+Y_res <- arrayspecs(res_mat, p = dim(Y)[1], k = dim(Y)[2])
+
+# --- PCA on size-corrected (residual) shapes ---
+flat_res <- two.d.array(Y_res)
+pca <- prcomp(flat_res, center = TRUE, scale. = TRUE)
+
+# PCA summary / scree
+summary(pca)
+plot(pca)
+```
+
+#PCA to Dataframe for Plot
+
+```{r}
+# Plot with ggplot2
+pca_df <- data.frame(pca$x,
+                     Group = group)  # group vector as before
+
+# Extract IMAGE= lines from raw data
+ids <- c()
+for (i in 1:nrow(raw_data)) {
+  val <- raw_data[i, 1]
+  if (!is.na(val) && str_starts(as.character(val), "IMAGE=")) {
+    id <- str_remove(as.character(val), "IMAGE=")
+    ids <- c(ids, id)
+  }
+}
+
+#add ID's for PCA
+pca_df$ID <- ids
+```
+
+```{r}
+###FOR OLD PLOT WITH ELIPSE
+# Clean the PCA data
+pca_df <- pca_df %>%
+  filter(!is.na(Group), !is.na(PC1), !is.na(PC2)) %>%
+  mutate(Group = droplevels(factor(Group)))
+
+# Identify singleton groups (excluding Ardipithecus)
+singleton_df <- pca_df %>%
+  group_by(Group) %>%
+  filter(n() == 1 & Group != "Ardipithecus") %>%
+  ungroup()
+
+# Non-singleton or Ardipithecus specimens
+nonsingleton_df <- pca_df %>%
+  filter(!(ID %in% singleton_df$ID))
+```
+
+#Allometry Adjusted PCA Dataframe
+```{r}
+pca_df <- data.frame(pca$x, Group = group, CS = CS, logCS = logCS)
+
+# Extract IMAGE= lines from raw data
+ids <- c()
+for (i in 1:nrow(raw_data)) {
+  val <- raw_data[i, 1]
+  if (!is.na(val) && str_starts(as.character(val), "IMAGE=")) {
+    id <- str_remove(as.character(val), "IMAGE=")
+    ids <- c(ids, id)
+  }
+}
+pca_df$ID <- ids
+```
+
+#Theme help
+```{r}
+major_groups <- c("Gorilla","Pan","Pongo","Mandrillus","Hylobates","Homo sapiens")
+
+# Collapsing groups + special Ardi handling
+prep_plot_df <- function(df, xcol, ycol) {
+
+  df <- df %>%
+    mutate(
+      # Make Ardi label consistent
+      ID = ifelse(grepl("Ardi\\.png", ID, fixed = FALSE), "Ardi", ID),
+
+      # Collapse non-major taxa into "Other"
+      PlotGroup = ifelse(Group %in% major_groups, as.character(Group), "Other"),
+
+      # Mark Ardi for special styling
+      is_Ardi = (ID == "Ardi")
+    )
+
+  # Hulls only for major groups (and only if >= 3 points)
+  hull_df <- df %>%
+    filter(PlotGroup %in% major_groups) %>%
+    group_by(PlotGroup) %>%
+    filter(n() >= 3) %>%
+    slice(chull(.data[[xcol]], .data[[ycol]])) %>%
+    ungroup()
+
+  # Label everything NOT in major groups, plus Ardi (even if it is)
+  label_df <- df %>%
+    filter(PlotGroup == "Other" | is_Ardi)
+
+  list(df = df, hull_df = hull_df, label_df = label_df)
+}
+
+# Colorblind-friendly, distinct major colors + one color for Other + one for Ardi
+col_map <- c(
+  "Gorilla"     = "#0072B2",  # blue
+  "Pan"         = "#009E73",  # green
+  "Pongo"       = "#E69F00",  # orange
+  "Mandrillus"  = "#CC79A7",  # purple
+  "Hylobates"   = "#56B4E9",  # light blue
+  "Homo sapiens"= "#D55E00",  # vermillion
+  "Other"       = "grey40"
+)
+
+# Point shapes (Ardi distinct)
+shape_map <- c(
+  "Major" = 16,  # filled circle
+  "Other" = 1,   # open circle
+  "Ardi"  = 17   # triangle
+)
+```
+
+#Plot PCA
+
+```{r}
+pp <- prep_plot_df(pca_df, xcol = "PC1", ycol = "PC2")
+
+ggplot(pp$df, aes(x = PC1, y = PC2)) +
+  # Closed convex hulls for major groups
+  geom_polygon(
+    data = pp$hull_df,
+    aes(group = PlotGroup, fill = PlotGroup, color = PlotGroup),
+    alpha = 0.12,
+    linewidth = 0.9
+  ) +
+
+  # Points: major vs other + special Ardi
+  geom_point(
+    aes(
+      color = PlotGroup,
+      shape = dplyr::case_when(
+        is_Ardi ~ "Ardi",
+        PlotGroup == "Other" ~ "Other",
+        TRUE ~ "Major"
+      )
+    ),
+    size = 2.4,
+    alpha = 0.9,
+    stroke = 1
+  ) +
+
+  # Labels: Other + Ardi
+  geom_text_repel(
+    data = pp$label_df,
+    aes(label = ID),
+    color = "black",
+    size = 3.2,
+    max.overlaps = Inf,
+    box.padding = 0.35,
+    point.padding = 0.2,
+    min.segment.length = 0
+  ) +
+
+  scale_color_manual(values = col_map) +
+  scale_fill_manual(values = col_map) +
+  scale_shape_manual(values = shape_map) +
+
+  labs(
+    title = "Allometry-adjusted PCA: PC1 vs PC2",
+    x = "PC1 (allometry-adjusted)",
+    y = "PC2 (allometry-adjusted)"
+  ) +
+  theme_bw() +
+  theme(legend.title = element_blank())
+```
+```{r}
+###OLD PLOT WITH ELIPSE
+# Plot
+ggplot() +
+  # Non-singletons and Ardipithecus: group-colored
+  geom_point(data = nonsingleton_df, aes(x = PC1, y = PC2, color = Group), size = 2, alpha = 0.85) +
+
+  # Ellipses only for groups with >1 specimen
+  stat_ellipse(data = nonsingleton_df, aes(x = PC1, y = PC2, group = Group, color = Group),
+               type = "norm", linetype = "solid", linewidth = 1, alpha = 0.8) +
+
+  # Singleton specimens (excluding Ardipithecus): black X
+  geom_point(data = singleton_df, aes(x = PC1, y = PC2), color = "black", shape = 4, size = 3, stroke = 1.2) +
+
+  # Label Ardipithecus (bold)
+  geom_text_repel(data = filter(pca_df, Group == "Ardipithecus"), aes(x = PC1, y = PC2, label = ID), color = "red", fontface = "bold", size = 4) +
+
+  # Label remaining singletons (italic)
+  geom_text_repel(data = singleton_df,
+                  aes(x = PC1, y = PC2, label = ID),
+                  color = "black", fontface = "italic", size = 3.5) +
+
+  labs(title = "PCA of Talus Shape (Singletons Highlighted, Ardipithecus Labeled)",
+       x = "PC1", y = "PC2") +
+  theme_bw() +
+  theme(legend.title = element_blank())
+```
+
+#Allometry PCA
+```{r}
+pp <- prep_plot_df(pca_df, xcol = "PC1", ycol = "PC2")
+
+ggplot(pp$df, aes(x = PC1, y = PC2)) +
+  # Closed convex hulls for major groups
+  geom_polygon(
+    data = pp$hull_df,
+    aes(group = PlotGroup, fill = PlotGroup, color = PlotGroup),
+    alpha = 0.12,
+    linewidth = 0.9
+  ) +
+
+  # Points: major vs other + special Ardi
+  geom_point(
+    aes(
+      color = PlotGroup,
+      shape = dplyr::case_when(
+        is_Ardi ~ "Ardi",
+        PlotGroup == "Other" ~ "Other",
+        TRUE ~ "Major"
+      )
+    ),
+    size = 2.4,
+    alpha = 0.9,
+    stroke = 1
+  ) +
+
+  # Labels: Other + Ardi
+  geom_text_repel(
+    data = pp$label_df,
+    aes(label = ID),
+    color = "black",
+    size = 3.2,
+    max.overlaps = Inf,
+    box.padding = 0.35,
+    point.padding = 0.2,
+    min.segment.length = 0
+  ) +
+
+  scale_color_manual(values = col_map) +
+  scale_fill_manual(values = col_map) +
+  scale_shape_manual(values = shape_map) +
+
+  labs(
+    title = "Allometry-adjusted PCA: PC1 vs PC2",
+    x = "PC1 (allometry-adjusted)",
+    y = "PC2 (allometry-adjusted)"
+  ) +
+  theme_bw() +
+  theme(legend.title = element_blank())
+```
+
+#DFA
+
+```{r}
+library(MASS)
+library(dplyr)
+
+# Step 1: Identify singleton groups and Ardipithecus
+singleton_ids <- pca_df %>%
+  group_by(Group) %>%
+  filter(n() == 1 & Group != "Ardipithecus") %>%
+  pull(ID)
+
+ardi_ids <- pca_df %>%
+  filter(Group == "Ardipithecus") %>%
+  pull(ID)
+
+# Combine those to be predicted
+to_predict_ids <- c(singleton_ids, ardi_ids)
+
+# Step 2: Split data into training (non-singleton, non-Ardi) and testing (Ardi + singletons)
+train_df <- pca_df %>% filter(!(ID %in% to_predict_ids))
+test_df  <- pca_df %>% filter(ID %in% to_predict_ids)
+
+# Step 3: Choose top PCs (e.g., PC1 to PC5)
+train_data <- train_df %>% dplyr::select(Group, PC1, PC2, PC3, PC4, PC5)
+test_data  <- test_df %>% dplyr::select(PC1, PC2, PC3, PC4, PC5)
+
+# Step 4: Fit DFA model
+dfa_model <- lda(Group ~ ., data = train_data)
+
+# Step 5: Predict group membership for Ardi + singletons
+dfa_pred <- predict(dfa_model, newdata = test_data)
+
+# Step 6: Add predicted groups to full data
+pca_df$PredictedGroup <- pca_df$Group  # start by assuming true group
+pca_df$PredictionType <- "True"        # label how each group was assigned
+
+# Replace predicted group labels for Ardi + singletons
+pca_df$PredictedGroup[pca_df$ID %in% to_predict_ids] <- dfa_pred$class
+pca_df$PredictionType[pca_df$ID %in% to_predict_ids] <- "Predicted"
+
+# Step 7: View predictions
+predictions <- pca_df %>%
+  filter(PredictionType == "Predicted") %>%
+  dplyr::select(ID, Group, PredictedGroup)
+
+print(predictions)
+```
+#Allometry Adjusted DFA
+```{r}
+# ================= Predict fossil group membership (allometry-adjusted LDA) =================
+library(geomorph)
+library(MASS)
+library(dplyr)
+
+# Assumes you already have:
+#   coords_flipped : p x k x n array (aligned sides, landmarks removed as desired)
+#   group          : factor length n (your original Group labels)
+#   pca_df$ID      : specimen IDs (same order as coords_flipped / group)
+
+# ---- define extant training groups (the reference classes you want fossils assigned to) ----
+train_groups <- c("Gorilla","Pan","Pongo","Mandrillus","Hylobates","Homo sapiens")
+
+# ---- define which specimens are fossils ----
+# Option A (recommended): fossils are anything NOT in the extant training groups
+# (this will include Ardipithecus + named fossils like AL288.1, LB1, etc.)
+is_fossil <- !(as.character(group) %in% train_groups)
+
+# If you want to be explicit instead, uncomment and list fossil groups:
+# fossil_groups <- c("Ardipithecus","LB1","AL288.1","AL333-147","STW 88","KNM-ER 1464",
+#                    "KNM-ER 1476","Littlefoot","MH2","OH8","Omo")
+# is_fossil <- as.character(group) %in% fossil_groups
+
+# ---- 1) GPA ----
+gpa <- gpagen(coords_flipped, print.progress = FALSE)
+Y     <- gpa$coords
+CS    <- gpa$Csize
+logCS <- log(CS)
+
+# ---- 2) Remove allometry (shape ~ logCS) ----
+fit_allom <- procD.lm(Y ~ logCS, iter = 999)
+Y_res <- arrayspecs(residuals(fit_allom), p = dim(Y)[1], k = dim(Y)[2])
+
+# ---- 3) PCA on residual shapes (use PC scores as LDA features) ----
+pca_adj <- prcomp(two.d.array(Y_res), center = TRUE, scale. = TRUE)
+
+# ---- 4) Choose number of PCs safely (avoid p >> n, and keep at least 2 for LD1/LD2) ----
+var_explained <- cumsum(pca_adj$sdev^2) / sum(pca_adj$sdev^2)
+npc_95 <- which(var_explained >= 0.95)[1]
+
+n_train <- sum(!is_fossil & (as.character(group) %in% train_groups))
+g_train <- length(unique(as.character(group)[!is_fossil & (as.character(group) %in% train_groups)]))
+
+npc_max <- max(2, n_train - g_train - 1)
+npc <- min(npc_95, 10, npc_max)
+npc <- max(npc, 2)
+
+pc_all <- as.data.frame(pca_adj$x[, 1:npc, drop = FALSE])
+pc_all$Group <- as.factor(group)
+
+# ---- 5) Fit LDA on extant training set only ----
+train_idx <- (!is_fossil) & (as.character(group) %in% train_groups)
+test_idx  <- is_fossil
+
+train_df <- pc_all[train_idx, , drop = FALSE]
+train_df$Group <- droplevels(as.factor(as.character(train_df$Group)))
+
+test_df <- pc_all[test_idx, setdiff(names(train_df), "Group"), drop = FALSE]
+
+lda_fit <- lda(Group ~ ., data = train_df)
+
+# ---- 6) Predict fossils: class + posterior probabilities ----
+pred <- predict(lda_fit, newdata = test_df)
+
+fossil_pred_df <- data.frame(
+  ID            = pca_df$ID[test_idx],
+  OriginalGroup = as.character(group[test_idx]),
+  PredictedGroup = as.character(pred$class),
+  stringsAsFactors = FALSE
+)
+
+post <- as.data.frame(pred$posterior)
+colnames(post) <- paste0("post_", colnames(post))
+fossil_pred_df <- cbind(fossil_pred_df, post)
+
+# ---- 7) (Optional) add a "max posterior" confidence column ----
+fossil_pred_df$max_posterior <- apply(pred$posterior, 1, max)
+
+# ---- output ----
+fossil_pred_df <- fossil_pred_df %>%
+  arrange(desc(max_posterior))
+
+print(fossil_pred_df)
+
+# If you want to save:
+# write.csv(fossil_pred_df, "fossil_group_predictions_allometry_adjusted_LDA.csv", row.names = FALSE)
+
+
+```
+
+```{r}
+summary(fit_allom)  # procD.lm output (permutation-based)
+
+plot(pca$x[,1], logCS,
+     xlab = "PC1 (raw shape)",
+     ylab = "log centroid size") +
+abline(lm(logCS ~ pca$x[,1]))
+
+```
+#Plot DFA
+
+```{r}
+# Step 1: Get DFA projection (LD scores)
+dfa_projection <- as.data.frame(predict(dfa_model)$x)
+dfa_projection$ID <- train_df$ID  # IDs for training specimens
+dfa_projection$Group <- train_df$Group
+dfa_projection$PredictionType <- "True"
+
+# Step 2: Project test specimens (Ardi + singletons) into DFA space
+dfa_test_projection <- as.data.frame(predict(dfa_model, newdata = test_data)$x)
+dfa_test_projection$ID <- test_df$ID
+dfa_test_projection$Group <- dfa_pred$class  # use predicted groups
+dfa_test_projection$PredictionType <- "Predicted"
+
+# Step 3: Combine for plotting
+dfa_plot_df <- rbind(dfa_projection, dfa_test_projection)
+
+# Step 4: Plot
+library(ggrepel)
+
+# Identify Ardipithecus + singleton IDs
+ardi_ids <- pca_df %>%
+  filter(Group == "Ardipithecus") %>%
+  pull(ID)
+
+singleton_ids <- pca_df %>%
+  group_by(Group) %>%
+  filter(n() == 1 & Group != "Ardipithecus") %>%
+  pull(ID)
+
+# Combine labels to apply
+label_ids <- c(ardi_ids, singleton_ids)
+
+# Plot with labels
+ggplot(dfa_plot_df, aes(x = LD1, y = LD2, color = Group, shape = PredictionType)) +
+  geom_point(aes(fill = Group, size = 2)) +
+  stat_ellipse(data = dfa_plot_df, aes(x = LD1, y = LD2, group = Group, color = Group),
+               type = "norm", linetype = "solid", linewidth = 1, alpha = 0.8) +
+  # Label Ardipithecus + singletons
+  geom_text_repel(
+    data = dfa_plot_df %>% filter(ID %in% label_ids),
+    aes(label = ID),
+    color = "black",
+    size = 3.5,
+    fontface = "bold"
+  ) +
+  scale_fill_manual(values=palette()) +
+  labs(title = "DFA: LD1 vs LD2 (Predicted Ardipithecus and Fossils)",
+       x = "LD1", y = "LD2", shape = "Type") +
+  coord_equal() +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+
+```
+#Plot Allometry DFA
+```{r}
+# ================= Plot allometry-adjusted LDA (ggplot) with our styling rules =================
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+
+# Assumes you already ran the prediction chunk and have:
+#   lda_fit, pc_all, train_idx, test_idx, pca_df$ID, group
+# and you have:
+#   pred <- predict(lda_fit, newdata = test_df)  OR you can re-run predict below
+
+# ---- get LDA scores for ALL specimens (train + fossils) ----
+# Build the feature matrix (same PCs used in training, without Group col)
+pc_feats <- pc_all[, setdiff(names(pc_all), "Group"), drop = FALSE]
+
+lda_scores_all <- as.data.frame(predict(lda_fit, newdata = pc_feats)$x)
+
+lda_plot_df <- data.frame(
+  ID    = pca_df$ID,
+  Group = as.factor(group),
+  LD1   = lda_scores_all$LD1,
+  LD2   = lda_scores_all$LD2,
+  stringsAsFactors = FALSE
+)
+
+# ---- styling rules ----
+major_groups <- c("Gorilla","Pan","Pongo","Mandrillus","Hylobates","Homo sapiens")
+
+col_map <- c(
+  "Gorilla"      = "#0072B2",
+  "Pan"          = "#009E73",
+  "Pongo"        = "#E69F00",
+  "Mandrillus"   = "#CC79A7",
+  "Hylobates"    = "#56B4E9",
+  "Homo sapiens" = "#D55E00",
+  "Other"        = "grey40",
+  "Ardi"         = "#000000"
+)
+
+shape_map <- c(
+  "Major" = 16,  # filled circle
+  "Other" = 1,   # open circle
+  "Ardi"  = 17   # triangle
+)
+
+# ---- collapse to PlotGroup + mark Ardi + define what gets labeled ----
+lda_plot_df <- lda_plot_df %>%
+  mutate(
+    ID = ifelse(grepl("Ardi\\.png", ID), "Ardi", ID),
+    PlotGroup = ifelse(as.character(Group) %in% major_groups, as.character(Group), "Other"),
+    is_Ardi = (ID == "Ardi"),
+    ShapeClass = case_when(
+      is_Ardi ~ "Ardi",
+      PlotGroup == "Other" ~ "Other",
+      TRUE ~ "Major"
+    ),
+    ColorClass = ifelse(is_Ardi, "Ardi", PlotGroup)
+  )
+
+# ---- convex hulls for major groups (closed automatically) ----
+hull_df <- lda_plot_df %>%
+  filter(PlotGroup %in% major_groups) %>%
+  group_by(PlotGroup) %>%
+  filter(n() >= 3) %>%
+  slice(chull(LD1, LD2)) %>%
+  ungroup()
+
+# ---- label everything not in major groups + Ardi ----
+label_df <- lda_plot_df %>%
+  filter(PlotGroup == "Other" | is_Ardi)
+
+# ---- plot ----
+ggplot(lda_plot_df, aes(x = LD1, y = LD2)) +
+
+  # Convex hulls (FIX: explicitly give x and y)
+  geom_polygon(
+    data = hull_df,
+    aes(x = LD1, y = LD2, group = PlotGroup, fill = PlotGroup, color = PlotGroup),
+    alpha = 0.12,
+    linewidth = 0.9
+  ) +
+
+  geom_point(
+    aes(color = ColorClass, shape = ShapeClass),
+    size = 2.4,
+    alpha = 0.9,
+    stroke = 1
+  ) +
+
+  geom_text_repel(
+    data = label_df,
+    aes(x = LD1, y = LD2, label = ID),
+    color = "black",
+    size = 3.2,
+    max.overlaps = Inf,
+    box.padding = 0.35,
+    point.padding = 0.2,
+    min.segment.length = 0
+  ) +
+
+  scale_color_manual(values = col_map, breaks = c(major_groups, "Other", "Ardi")) +
+  scale_fill_manual(values = col_map, breaks = major_groups) +
+  scale_shape_manual(values = shape_map, breaks = c("Major","Other","Ardi")) +
+
+  labs(
+    title = "Allometry-adjusted LDA (LD1 vs LD2)",
+    x = "LD1",
+    y = "LD2"
+  ) +
+  theme_bw() +
+  theme(legend.title = element_blank())
+
+```
+#View Landmarks in a plot
+
+```{r}
+library(tidyverse)
+library(geomorph)
+
+# Step 1: Extract dimensions
+n_landmarks <- dim(gpa$coords)[1]
+n_specimens <- dim(gpa$coords)[3]
+
+# Step 2: Build long-format data frame for plotting
+coords_list <- lapply(1:n_specimens, function(i) {
+  coords <- gpa$coords[,,i]
+  df <- as.data.frame(coords)
+  colnames(df) <- c("X", "Y")  # name the columns properly
+  df$Landmark <- 1:n_landmarks
+  df$Specimen <- i
+  df$Group <- group[i]
+  return(df)
+})
+land_df <- bind_rows(coords_list)
+
+# Step 3: Plot with ggplot2
+ggplot(land_df, aes(x = X, y = Y, group = Specimen, color = Group)) +
+  geom_path(alpha = 0.6, linewidth = 0.7) +
+  geom_point(size = 0.8) +
+  coord_equal() +
+  theme_minimal() +
+  labs(title = "GPA-Aligned Landmark Configurations by Group",
+       x = "X", y = "Y")
+```
+
+#Mean landmarks
+
+```{r}
+# Step 1: Extract consensus shape from GPA
+mean_shape <- as.data.frame(gpa$consensus)
+colnames(mean_shape) <- c("X", "Y")
+mean_shape$Landmark <- 1:nrow(mean_shape)
+
+# Step 2: Plot
+ggplot(mean_shape, aes(x = X, y = Y)) +
+  geom_path(color = "black", linewidth = 1) +
+  geom_point(size = 2, color = "red") +
+  coord_equal() +
+  theme_minimal() +
+  labs(title = "Hypothetical Mean Landmark Configuration",
+       x = "X", y = "Y")
+```
+
+#Mean Landmarks and their PC1 Loadings
+
+```{r}
+# Step 1: Extract mean shape
+mean_shape <- as.data.frame(gpa$consensus)
+colnames(mean_shape) <- c("X", "Y")
+mean_shape$Landmark <- 1:nrow(mean_shape)
+
+# Step 2: Extract PC1 loadings
+pc1_vector <- pca$rotation[, 1]
+
+# Step 3: Assign X and Y loadings per landmark
+pc1_loadings <- data.frame(
+  Landmark = 1:nrow(mean_shape),
+  LD_X = pc1_vector[seq(1, length(pc1_vector), by = 2)],
+  LD_Y = pc1_vector[seq(2, length(pc1_vector), by = 2)]
+)
+
+# Step 4: Calculate magnitude and scaled vectors
+pc1_loadings <- pc1_loadings %>%
+  mutate(
+    magnitude = sqrt(LD_X^2 + LD_Y^2),
+    LD_X = LD_X / magnitude,
+    LD_Y = LD_Y / magnitude,
+    scaled_X = LD_X * magnitude * 0.5,
+    scaled_Y = LD_Y * magnitude * 0.5,
+    label = round(magnitude, 3)
+  )
+
+# Step 5: Merge with mean shape
+mean_shape <- left_join(mean_shape, pc1_loadings, by = "Landmark")
+
+# Step 6: Plot with labels
+ggplot(mean_shape, aes(x = X, y = Y)) +
+  geom_path(color = "black", linewidth = 1) +
+  geom_point(size = 2, color = "red") +
+  geom_segment(
+    aes(xend = X + scaled_X, yend = Y + scaled_Y),
+    arrow = arrow(length = unit(0.15, "cm")),
+    color = "blue", alpha = 0.8
+  ) +
+  ggrepel::geom_text_repel(
+    aes(x = X + scaled_X, y = Y + scaled_Y, label = label),
+    size = 3,
+    color = "black",
+    box.padding = 0.2
+  ) +
+  coord_equal() +
+  theme_minimal() +
+  labs(
+    title = "Mean Shape with PC1 Loadings",
+    x = "X", y = "Y"
+  )
+
+```
+
+#Lowest Pc1 highest Pc2 Wireframe
+
+```{r}
+library(geomorph)
+
+# Step 1: Identify specimens
+pc1_scores <- pca$x[, 1]
+pc2_scores <- pca$x[, 2]
+
+lowest_pc1_index <- which.min(pc1_scores)
+highest_pc2_index <- which.max(pc2_scores)
+
+# Step 2: Extract GPA-aligned coordinates
+specimen_low_pc1  <- gpa$coords[,,lowest_pc1_index]
+specimen_high_pc2 <- gpa$coords[,,highest_pc2_index]
+
+# Optional: Define connections between landmarks
+# (Example: connect 1-2, 2-3, ..., or use your anatomical connection map)
+connections <- matrix(c(
+  1,2,
+  2,3,
+  3,4,
+  4,5,
+  5,6,
+  6,7,
+  7,8,
+  8,9,
+  8,1,
+  9,1,
+  9,2,
+  9,3,
+  9,4,
+  9,5,
+  9,6,
+  9,7,
+  2,10,
+  10,11,
+  11,4,
+  8,12,
+  12,13,
+  13,6,
+  1,14,
+  14,15,
+  15,16,
+  16,17,
+  4,18,
+  18,5,
+  5,19,
+  19,6,
+  14,17), ncol = 2, byrow = TRUE)
+
+# Step 3: Plot wireframe comparison
+plotRefToTarget(M1 = specimen_low_pc1,
+                M2 = specimen_high_pc2,
+                method = "points",
+                links = connections,
+                mag = 1,
+                label = TRUE,
+                main = "Wireframe: Lowest PC1 vs Highest PC2")
+
+plotRefToTarget(M1 = specimen_low_pc1,
+                M2 = specimen_low_pc1,   # same shape → no displacement
+                method = "points",       # no vectors
+                links = connections,
+                label = TRUE,
+                main = "Wireframe: Specimen (Lowest PC1 / Highest PC2)")
+
+
+```
+
+#Highest PC1 vs Lowest PC2
+
+```{r}
+library(geomorph)
+
+# Step 1: Identify specimens
+lowest_pc2_index <- which.min(pc2_scores)
+highest_pc1_index <- which.max(pc1_scores)
+
+# Step 2: Extract GPA-aligned coordinates
+specimen_low_pc2  <- gpa$coords[,,lowest_pc2_index]
+specimen_high_pc1 <- gpa$coords[,,highest_pc1_index]
+
+# Step 3: Plot wireframe comparison
+plotRefToTarget(M1 = specimen_low_pc2,
+                M2 = specimen_high_pc1,
+                method = "vector",
+                links = connections,
+                mag = 1,
+                label = TRUE,
+                col.resid = "blue",
+                main = "Wireframe: Highest PC1 vs Lowest PC2")
+
+```
+
+#Lowest Pc1 Lowest Pc2
+
+```{r}
+plotRefToTarget(M1 = specimen_high_pc2,
+                M2 = specimen_high_pc1,
+                method = "vector",
+                links = connections,
+                mag = 1,
+                label = TRUE,
+                col.resid = "blue",
+                main = "Wireframe: Highest PC1 vs Highest PC2")
+
+```
+
+#Highest Pc1 Highest Pc2
+
+```{r}
+plotRefToTarget(M1 = specimen_low_pc2,
+                M2 = specimen_low_pc1,
+                method = "vector",
+                links = connections,
+                mag = 1,
+                label = TRUE,
+                col.resid = "blue",
+                main = "Wireframe: Lowest PC1 vs Lowest PC2")
+
+```
+
+#PCA Loadings
+
+```{r}
+# Step 1: Extract loadings for PC1–PC3
+loadings <- as.data.frame(pca$rotation[, 1:3])
+colnames(loadings) <- c("PC1", "PC2", "PC3")
+
+# Step 2: Compute magnitude of XY loadings for each landmark
+n_landmarks <- nrow(loadings) / 2
+landmark_ids <- 1:n_landmarks
+
+# Combine X and Y loading magnitudes per landmark
+landmark_loadings <- data.frame(
+  Landmark = landmark_ids,
+  PC1 = sqrt(loadings$PC1[seq(1, nrow(loadings), by = 2)]^2 +
+             loadings$PC1[seq(2, nrow(loadings), by = 2)]^2),
+  PC2 = sqrt(loadings$PC2[seq(1, nrow(loadings), by = 2)]^2 +
+             loadings$PC2[seq(2, nrow(loadings), by = 2)]^2),
+  PC3 = sqrt(loadings$PC3[seq(1, nrow(loadings), by = 2)]^2 +
+             loadings$PC3[seq(2, nrow(loadings), by = 2)]^2)
+)
+
+# Step 3: Pivot to long format
+long_landmark_loadings <- landmark_loadings %>%
+  pivot_longer(cols = c(PC1, PC2, PC3), names_to = "PC", values_to = "Loading") %>%
+  mutate(Landmark = paste0("LM", Landmark))
+
+# Step 4: Plot
+ggplot(long_landmark_loadings, aes(x = Landmark, y = Loading, fill = PC)) +
+  geom_col(position = "dodge") +
+  theme_minimal() +
+  labs(title = "Landmark Influence on PC1–PC3 (Combined X & Y Loadings)",
+       x = "Landmark",
+       y = "Combined Loading Magnitude") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+```{r}
+# Step 1: Extract loadings from PCA
+loadings <- as.data.frame(pca$rotation[, 1:4])  # PC1 to PC4
+n_landmarks <- nrow(loadings) / 2
+
+# Step 2: Calculate combined loading (magnitude of X and Y) for each landmark per PC
+landmark_loadings <- data.frame(
+  Landmark = paste0("LM", 1:n_landmarks),
+  PC1 = sqrt(loadings$PC1[seq(1, nrow(loadings), 2)]^2 + loadings$PC1[seq(2, nrow(loadings), 2)]^2),
+  PC2 = sqrt(loadings$PC2[seq(1, nrow(loadings), 2)]^2 + loadings$PC2[seq(2, nrow(loadings), 2)]^2),
+  PC3 = sqrt(loadings$PC3[seq(1, nrow(loadings), 2)]^2 + loadings$PC3[seq(2, nrow(loadings), 2)]^2),
+  PC4 = sqrt(loadings$PC4[seq(1, nrow(loadings), 2)]^2 + loadings$PC4[seq(2, nrow(loadings), 2)]^2)
+)
+
+# Step 3: View or export the result
+print(landmark_loadings)
+```
+
+#Quadrant PC Wireframes
+```{r}
+library(grid)
+library(png)
+
+# ---- helper: make a wireframe grob from a single specimen shape ----
+make_wireframe_grob <- function(shape, links, file = tempfile(fileext = ".png"),
+                                width_px = 500, height_px = 500, res = 150) {
+
+  png(filename = file, width = width_px, height = height_px, res = res, bg = "transparent")
+  par(mar = c(0,0,0,0))
+  # Single wireframe only: M1=M2 and method="points" => no vectors
+  plotRefToTarget(M1 = shape, M2 = shape,
+                  method = "points",
+                  links = links,
+                  label = FALSE,
+                  mag = 1,
+                  axes = FALSE)   # no axes around the inset
+  dev.off()
+
+  img <- png::readPNG(file)
+  grid::rasterGrob(img, interpolate = TRUE)
+}
+
+# ---- identify extreme specimens on PC1 and PC2 ----
+pc1_scores <- pca$x[, 1]
+pc2_scores <- pca$x[, 2]
+
+idx_min_pc1 <- which.min(pc1_scores)
+idx_max_pc1 <- which.max(pc1_scores)
+idx_min_pc2 <- which.min(pc2_scores)
+idx_max_pc2 <- which.max(pc2_scores)
+
+# extract GPA-aligned landmark configs
+shape_min_pc1 <- gpa$coords[,,idx_min_pc1]
+shape_max_pc1 <- gpa$coords[,,idx_max_pc1]
+shape_min_pc2 <- gpa$coords[,,idx_min_pc2]
+shape_max_pc2 <- gpa$coords[,,idx_max_pc2]
+
+# make grobs
+g_min_pc1 <- make_wireframe_grob(shape_min_pc1, connections)
+g_max_pc1 <- make_wireframe_grob(shape_max_pc1, connections)
+g_min_pc2 <- make_wireframe_grob(shape_min_pc2, connections)
+g_max_pc2 <- make_wireframe_grob(shape_max_pc2, connections)
+
+# ---- where to place the insets (near their PCA points) ----
+extreme_points <- tibble::tibble(
+  which = c("minPC1","maxPC1","minPC2","maxPC2"),
+  idx   = c(idx_min_pc1, idx_max_pc1, idx_min_pc2, idx_max_pc2)
+) |>
+  dplyr::mutate(
+    x = pca_df$PC1[idx],
+    y = pca_df$PC2[idx]
+  )
+
+# inset size in "PC units"
+w <- diff(range(pca_df$PC1, na.rm = TRUE)) * 0.12
+h <- diff(range(pca_df$PC2, na.rm = TRUE)) * 0.12
+
+# ---- base PC1 vs PC2 plot ----
+p_pc1pc2 <- ggplot(pca_df, aes(PC1, PC2, color = Group)) +
+  geom_point(size = 2, alpha = 0.85) +
+  theme_bw() +
+  theme(legend.title = element_blank()) +
+  labs(title = "PCA (PC1 vs PC2) with Extreme-Specimen Wireframes",
+       x = "PC1", y = "PC2")
+
+# ---- add inset wireframes near their corresponding points ----
+p_pc1pc2 +
+  annotation_custom(g_min_pc1,
+                    xmin = extreme_points$x[extreme_points$which=="minPC1"] - w,
+                    xmax = extreme_points$x[extreme_points$which=="minPC1"] + w,
+                    ymin = extreme_points$y[extreme_points$which=="minPC1"] - h,
+                    ymax = extreme_points$y[extreme_points$which=="minPC1"] + h) +
+  annotation_custom(g_max_pc1,
+                    xmin = extreme_points$x[extreme_points$which=="maxPC1"] - w,
+                    xmax = extreme_points$x[extreme_points$which=="maxPC1"] + w,
+                    ymin = extreme_points$y[extreme_points$which=="maxPC1"] - h,
+                    ymax = extreme_points$y[extreme_points$which=="maxPC1"] + h) +
+  annotation_custom(g_min_pc2,
+                    xmin = extreme_points$x[extreme_points$which=="minPC2"] - w,
+                    xmax = extreme_points$x[extreme_points$which=="minPC2"] + w,
+                    ymin = extreme_points$y[extreme_points$which=="minPC2"] - h,
+                    ymax = extreme_points$y[extreme_points$which=="minPC2"] + h) +
+  annotation_custom(g_max_pc2,
+                    xmin = extreme_points$x[extreme_points$which=="maxPC2"] - w,
+                    xmax = extreme_points$x[extreme_points$which=="maxPC2"] + w,
+                    ymin = extreme_points$y[extreme_points$which=="maxPC2"] - h,
+                    ymax = extreme_points$y[extreme_points$which=="maxPC2"] + h)
+```
+
+```{r}
+reconstruct_shape_from_pc <- function(pca, pc_index, score_value, p, k) {
+  # scores vector: all zero except the PC you care about
+  s <- rep(0, ncol(pca$x))
+  s[pc_index] <- score_value
+
+  # Reconstruct in *scaled* space, then unscale and uncenter
+  X_scaled_hat <- s %*% t(pca$rotation)                 # 1 x (p*k)
+  X_hat_vec <- as.numeric(X_scaled_hat) * pca$scale + pca$center  # length = p*k
+
+  # arrayspecs needs a matrix with 1 row
+  X_hat_mat <- matrix(X_hat_vec, nrow = 1)
+
+  # Convert back to p x k (single specimen)
+  geomorph::arrayspecs(X_hat_mat, p = p, k = k)[,,1]
+}
+```
+
+```{r}
+p <- dim(gpa$coords)[1]
+k <- dim(gpa$coords)[2]
+
+pc1_min <- min(pca$x[,1], na.rm = TRUE)
+pc1_max <- max(pca$x[,1], na.rm = TRUE)
+pc2_min <- min(pca$x[,2], na.rm = TRUE)
+pc2_max <- max(pca$x[,2], na.rm = TRUE)
+
+shape_pc1_min <- reconstruct_shape_from_pc(pca, 1, pc1_min, p, k)
+shape_pc1_max <- reconstruct_shape_from_pc(pca, 1, pc1_max, p, k)
+shape_pc2_min <- reconstruct_shape_from_pc(pca, 2, pc2_min, p, k)
+shape_pc2_max <- reconstruct_shape_from_pc(pca, 2, pc2_max, p, k)
+
+op <- par(mfrow = c(2,2), mar = c(0.5, 0.5, 2, 0.5))
+plotRefToTarget(shape_pc1_min, shape_pc1_min, method="points", links=connections,
+                label=FALSE, axes=FALSE, main="Hypothetical PC1 MIN")
+plotRefToTarget(shape_pc1_max, shape_pc1_max, method="points", links=connections,
+                label=FALSE, axes=FALSE, main="Hypothetical PC1 MAX")
+plotRefToTarget(shape_pc2_min, shape_pc2_min, method="points", links=connections,
+                label=FALSE, axes=FALSE, main="Hypothetical PC2 MIN")
+plotRefToTarget(shape_pc2_max, shape_pc2_max, method="points", links=connections,
+                label=FALSE, axes=FALSE, main="Hypothetical PC2 MAX")
+par(op)
+```
+
+
+```{r}
+library(ggplot2)
+library(grid)
+library(png)
+```
+```{r}
+# ---- helper: turn a single-shape wireframe into a grob (PNG) ----
+wireframe_grob <- function(shape, links, file = tempfile(fileext = ".png"),
+                           width_px = 600, height_px = 600, res = 160) {
+
+  png(filename = file, width = width_px, height = height_px, res = res, bg = "transparent")
+  par(mar = c(0,0,0,0))
+  plotRefToTarget(M1 = shape, M2 = shape,
+                  method = "points",
+                  links = links,
+                  label = FALSE,
+                  axes = FALSE)
+  dev.off()
+
+  img <- png::readPNG(file)
+  grid::rasterGrob(img, interpolate = TRUE)
+}
+
+# ---- make the 4 grobs (hypothetical extremes) ----
+g_pc1_min <- wireframe_grob(shape_pc1_min, connections)
+g_pc1_max <- wireframe_grob(shape_pc1_max, connections)
+g_pc2_min <- wireframe_grob(shape_pc2_min, connections)
+g_pc2_max <- wireframe_grob(shape_pc2_max, connections)
+
+# ---- convex hulls for selected groups ----
+hull_df <- nonsingleton_df %>%
+  dplyr::filter(Group %in% hull_groups) %>%
+  dplyr::group_by(Group) %>%
+  dplyr::slice(chull(PC1, PC2)) %>%
+  dplyr::slice(c(1:n(), 1)) %>%   # <-- closes the polygon
+  dplyr::ungroup()
+
+
+# ---- base PC1 vs PC2 plot ----
+p <- ggplot() +
+  # Non-singletons and Ardipithecus: group-colored
+  geom_point(data = nonsingleton_df, aes(x = PC1, y = PC2, color = Group), size = 2, alpha = 0.85) +
+  # Convex hulls (filled + outline) for selected groups
+  geom_polygon(
+    data = hull_df,
+    aes(x = PC1, y = PC2, group = Group, fill = Group),
+    alpha = 0.15,
+    color = NA
+  ) +
+  geom_path(
+    data = hull_df,
+    aes(x = PC1, y = PC2, group = Group, color = Group),
+    linewidth = 0.9
+  ) +
+  # Singleton specimens (excluding Ardipithecus): black X
+  geom_point(data = singleton_df, aes(x = PC1, y = PC2), color = "black", shape = 4, size = 3, stroke = 1.2) +
+
+  # Label Ardipithecus (bold)
+  geom_text_repel(data = filter(pca_df, Group == "Ardipithecus"), aes(x = PC1, y = PC2, label = ID), color = "red", fontface = "bold", size = 4) +
+
+  # Label remaining singletons (italic)
+  geom_text_repel(data = singleton_df,
+                  aes(x = PC1, y = PC2, label = ID),
+                  color = "black", fontface = "italic", size = 3.5) +
+
+  labs(title = "PCA of Talus Shape (Singletons Highlighted, Ardipithecus Labeled)",
+       x = "PC1", y = "PC2") +
+  theme_bw() +
+  theme(legend.title = element_blank())
+
+# ---- figure bounds + inset boxes in corner coordinates ----
+x_rng <- range(pca_df$PC1, na.rm = TRUE)
+y_rng <- range(pca_df$PC2, na.rm = TRUE)
+
+dx <- diff(x_rng)
+dy <- diff(y_rng)
+
+pad_x <- dx * .8
+pad_y <- dy * .75
+
+box_w <- dx * 0.3   # size of inset boxes (tweak)
+box_h <- dy * 0.3
+
+# Corners (xmin/xmax/ymin/ymax) for each inset
+# Top-left    = PC1 min / PC2 max
+# Top-right   = PC1 max / PC2 max
+# Bottom-left = PC1 min / PC2 min
+# Bottom-right= PC1 max / PC2 min
+
+TL <- list(xmin = x_rng[1] + pad_x,
+           xmax = x_rng[1] + pad_x + box_w,
+           ymin = y_rng[2] - pad_y - box_h,
+           ymax = y_rng[2] - pad_y)
+
+TR <- list(xmin = x_rng[2] - pad_x - box_w,
+           xmax = x_rng[2] - pad_x,
+           ymin = y_rng[2] - pad_y - box_h,
+           ymax = y_rng[2] - pad_y)
+
+BL <- list(xmin = x_rng[1] + pad_x,
+           xmax = x_rng[1] + pad_x + box_w,
+           ymin = y_rng[1] + pad_y,
+           ymax = y_rng[1] + pad_y + box_h)
+
+BR <- list(xmin = x_rng[2] - pad_x - box_w,
+           xmax = x_rng[2] - pad_x,
+           ymin = y_rng[1] + pad_y,
+           ymax = y_rng[1] + pad_y + box_h)
+
+# ---- add the insets ----
+# Corner mapping uses the correct combination:
+# TL = PC1min + PC2max
+# TR = PC1max + PC2max
+# BL = PC1min + PC2min
+# BR = PC1max + PC2min
+
+p +
+  annotation_custom(grob = g_pc1_min, xmin = BL$xmin, xmax = BL$xmax, ymin = BL$ymin, ymax = BL$ymax) +
+  annotation_custom(grob = g_pc1_max, xmin = BR$xmin, xmax = BR$xmax, ymin = BR$ymin, ymax = BR$ymax) +
+  annotation_custom(grob = g_pc2_max, xmin = TL$xmin, xmax = TL$xmax, ymin = TL$ymin, ymax = TL$ymax) +
+  annotation_custom(grob = g_pc2_min, xmin = TR$xmin, xmax = TR$xmax, ymin = TR$ymin, ymax = TR$ymax)
+```

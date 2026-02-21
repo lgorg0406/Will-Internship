@@ -1,0 +1,259 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-02-20"
+---
+
+```{r}
+library(readxl)
+library(dplyr)
+library(geomorph)
+library(ggplot2)
+library(ggforce)
+library(ggrepel)
+library(MASS)
+library(readxl)
+library(tidyverse)
+library(stringr)
+```
+```{r}
+file_path <- "data/raw/TPS combined.xlsx"
+raw <- read_excel(file_path, sheet = "Sheet1", col_names = FALSE)
+
+colnames(raw) <- c("V1","V2")
+
+# helpers
+is_num <- function(x) !is.na(suppressWarnings(as.numeric(x)))
+as_num <- function(x) suppressWarnings(as.numeric(x))
+
+lm_starts <- which(str_detect(as.character(raw$V1), "^LM="))
+
+spec_list <- vector("list", length(lm_starts))
+
+for (s in seq_along(lm_starts)) {
+  i0 <- lm_starts[s]
+  i1 <- if (s < length(lm_starts)) lm_starts[s + 1] - 1 else nrow(raw)
+
+  block <- raw[i0:i1, , drop = FALSE]
+
+  # number of landmarks in this specimen
+  k <- as.integer(str_match(as.character(block$V1[1]), "^LM=(\\d+)")[,2])
+
+  # landmark coordinate rows (both columns numeric)
+  coord_rows <- which(is_num(block$V1) & is_num(block$V2))
+  coords <- block[coord_rows, , drop = FALSE] %>%
+    transmute(x = as_num(V1), y = as_num(V2)) %>%
+    slice_head(n = k)  # in case anything extra sneaks in
+
+  # metadata (optional)
+  id_row    <- block$V1[str_detect(as.character(block$V1), "^ID=")]
+  image_row <- block$V1[str_detect(as.character(block$V1), "^IMAGE=")]
+  scale_row <- block$V1[str_detect(as.character(block$V1), "^SCALE=")]
+
+  specimen_id <- if (length(id_row))    sub("^ID=", "", as.character(id_row[1])) else paste0("spec_", s)
+  image_file  <- if (length(image_row)) sub("^IMAGE=", "", as.character(image_row[1])) else NA_character_
+  scale_val   <- if (length(scale_row)) as_num(sub("^SCALE=", "", as.character(scale_row[1]))) else NA_real_
+
+  # make wide names: LM01_x, LM01_y, ...
+  x_names <- sprintf("LM%02d_x", seq_len(nrow(coords)))
+  y_names <- sprintf("LM%02d_y", seq_len(nrow(coords)))
+
+  wide_row <- as_tibble(as.list(c(setNames(coords$x, x_names),
+                                  setNames(coords$y, y_names)))) %>%
+    mutate(specimen = specimen_id, IMAGE = image_file, SCALE = scale_val, .before = 1)
+
+  spec_list[[s]] <- wide_row
+}
+
+wide_df <- bind_rows(spec_list)
+
+wide_df
+write.csv(wide_df, "data/clean/LandmarkDataCleaned.csv", row.names = FALSE)
+```
+
+```{r}
+# landmark columns are like LM01_x / LM01_y
+lm_cols <- names(wide_df)[str_detect(names(wide_df), "^LM\\d+_[xy]$")]
+
+# extract landmark numbers, sort numerically
+lm_nums <- lm_cols |>
+  str_extract("(?<=LM)\\d+(?=_[xy]$)") |>
+  unique() |>
+  as.integer() |>
+  sort()
+
+# build paired order with zero-padding to match LM01 format
+paired_order <- unlist(lapply(lm_nums, function(i) {
+  id <- sprintf("%02d", i)
+  c(paste0("LM", id, "_x"),
+    paste0("LM", id, "_y"))
+}))
+
+# keep non-landmark columns up front
+other_cols <- setdiff(names(wide_df), lm_cols)
+
+wide_df <- wide_df |>
+  dplyr::select(all_of(other_cols), all_of(paired_order))
+```
+
+
+```{r}
+# Remove metadata
+coords_only <- wide_df[, -(1:3)]
+
+# Convert to matrix
+coord_matrix <- as.matrix(coords_only)
+
+# Build 3D array: p = landmarks, k = dimensions (2), n = specimens
+land_array <- arrayspecs(coord_matrix, p = 21, k = 2)
+
+dim(land_array)
+```
+
+```{r}
+side_vector <- c("L","L","R","L","L","L","L","L","L","L","L","L","L","R","L","R","L","L","L","R","R","R","R","L","L","L","R","L","L","R","L","L","L","L","L","L","R","L","L","L","R","R","L","L","L","R","R","R","R","R","R","R","L","R","L","L","R","R","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","R","R","L","L","R","L","L","R","L","L","R","R","L","L","R","R","R","R","L","L","R","L","R")
+
+coords_flipped <- land_array  # make a copy to modify
+for (i in 1:dim(land_array)[3]) {
+  if (side_vector[i] == "R") {
+    coords_flipped[,1,i] <- -land_array[,1,i]  # Flip X only
+  }
+}
+```
+
+```{r}
+rm_lm <- c(14, 21)
+
+# land_array is p x 2 x n (e.g., 21 x 2 x N)
+land_array_reduced <- coords_flipped[-rm_lm, , , drop = FALSE]
+
+# quick check
+dim(land_array)          # e.g., 21 2 N
+dim(land_array_reduced)  # e.g., 19 2 N
+```
+
+```{r}
+gpa <- gpagen(land_array_reduced)
+```
+
+```{r}
+pca <- gm.prcomp(gpa$coords)
+summary(pca)
+```
+```{r}
+pc_scores <- as.data.frame(pca$x)
+
+head(pc_scores)
+```
+```{r}
+pc_df <- as.data.frame(pca$x[, 1:4])
+colnames(pc_df) <- c("PC1", "PC2", "PC3", "PC4")
+pc_df$group <- wide_df$specimen
+```
+
+
+```{r}
+## ---------------------------------------------------------
+## Define fossil grouping
+## ---------------------------------------------------------
+extant_taxa <- c("Gorilla", "Homo sapiens", "Pan", 
+                 "Pongo", "Hylobates", "Mandrillus")
+
+pc_df <- pc_df %>%
+  mutate(
+    fossil_status = case_when(
+      group %in% extant_taxa ~ "Extant",
+      group == "Ardipithecus" ~ "Ardipithecus",
+      TRUE ~ "Other Fossil"
+    )
+  )
+
+## ---------------------------------------------------------
+## Build CLOSED convex hulls
+## ---------------------------------------------------------
+hulls <- pc_df %>%
+  group_by(group) %>%
+  filter(n() >= 3) %>%
+  group_modify(~{
+    h <- .x[chull(.x$PC1, .x$PC2), , drop = FALSE]
+    rbind(h, h[1, , drop = FALSE])  # repeat first row to close
+  }) %>%
+  ungroup()
+
+## ---------------------------------------------------------
+## Plot
+## ---------------------------------------------------------
+ggplot(pc_df, aes(PC1, PC2)) +
+
+  ## Filled hulls
+  geom_polygon(
+    data = hulls,
+    aes(fill = group, group = group),
+    alpha = 0.15,
+    color = NA
+  ) +
+
+  ## Hull outlines (closed)
+  geom_polygon(
+    data = hulls,
+    aes(color = group, group = group),
+    fill = NA,
+    linewidth = 0.8
+  ) +
+
+  ## Points
+  geom_point(
+    aes(color = group),
+    size = 3
+  ) +
+
+  ## Fossil labels
+  geom_text_repel(
+    data = pc_df %>% filter(fossil_status != "Extant"),
+    aes(label = group,
+        color = fossil_status),
+    size = 3.5,
+    show.legend = FALSE
+  ) +
+
+  ## Manual fossil colors
+  scale_color_manual(
+    values = c(
+      "Ardipithecus" = "red3",
+      "Other Fossil" = "black",
+      "Gorilla" = "#1b9e77",
+      "Homo sapiens" = "#d95f02",
+      "Pan" = "#7570b3",
+      "Pongo" = "#e7298a",
+      "Hylobates" = "#66a61e",
+      "Mandrillus" = "#a6761d"
+    )
+  ) +
+
+  scale_fill_manual(
+    values = c(
+      "Gorilla" = "#1b9e77",
+      "Homo sapiens" = "#d95f02",
+      "Pan" = "#7570b3",
+      "Pongo" = "#e7298a",
+      "Hylobates" = "#66a61e",
+      "Mandrillus" = "#a6761d"
+    )
+  ) +
+  coord_equal() +
+  theme_classic() +
+  theme(legend.position = "right")
+```
+
+```{r}
+extant_taxa <- c("Gorilla", "Homo sapiens", "Pan", 
+                 "Pongo", "Hylobates", "Mandrillus")
+
+pca_df <- pca$x |> mutate(
+    fossil_status = case_when(
+      group %in% extant_taxa ~ "Extant",
+      group == "Ardipithecus" ~ "Ardipithecus",
+      TRUE ~ "Other Fossil"
+    )
+  )
+```
