@@ -11,14 +11,15 @@ library(geomorph)
 library(ggplot2)
 library(ggforce)
 library(ggrepel)
+library(here)
 library(MASS)
 library(readxl)
 library(tidyverse)
 library(stringr)
 ```
 ```{r}
-file_path <- "data/raw/TPS combined.xlsx"
-raw <- read_excel(file_path, sheet = "Sheet1", col_names = FALSE)
+file_path <- here("data", "raw", "TPS RAW MARCH 6.xlsx")
+raw <- read_excel(here(file_path), sheet = "Sheet1", col_names = FALSE,na = "empty")
 
 colnames(raw) <- c("V1","V2")
 
@@ -68,7 +69,9 @@ for (s in seq_along(lm_starts)) {
 wide_df <- bind_rows(spec_list)
 
 wide_df
-write.csv(wide_df, "data/clean/LandmarkDataCleaned.csv", row.names = FALSE)
+
+exportpath <- here("data", "clean", "CLEAN MARCH 6.csv")
+write.csv(wide_df, exportpath, row.names = FALSE)
 ```
 
 ```{r}
@@ -111,7 +114,10 @@ dim(land_array)
 ```
 
 ```{r}
-side_vector <- c("L","L","R","L","L","L","L","L","L","L","L","L","L","R","L","R","L","L","L","R","R","R","R","L","L","L","R","L","L","R","L","L","L","L","L","L","R","L","L","L","R","R","L","L","L","R","R","R","R","R","R","R","L","R","L","L","R","R","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","R","R","L","L","R","L","L","R","L","L","R","R","L","L","R","R","R","R","L","L","R","L","R")
+side_vector <- c("L","L","R","L","L","L","L","L","L","L","L","L","L","R","L","R","L","L","L","R","R","R","R","L","L","L","R","L","L","R","L","L","L","L","L","L","R","L","L","L","R","R","L","L","L","R","R","R","R","R","R","R","L","R","L","L","R","R","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","L","R","R","L","L","R","L","L","R","L","L","R","R","L","L","R","R","R","R","L","L","R","L","R","L",
+                 "R","L","R","R","R","L","L","R","L","R", #colobus
+                 "R","L","R","R","L","R","R","R","L","L", #New Hylobatidae
+                 "L","R","R","L") #New Mandrillus
 
 coords_flipped <- land_array  # make a copy to modify
 for (i in 1:dim(land_array)[3]) {
@@ -157,7 +163,7 @@ pc_df$group <- wide_df$specimen
 ## Define fossil grouping
 ## ---------------------------------------------------------
 extant_taxa <- c("Gorilla", "Homo sapiens", "Pan", 
-                 "Pongo", "Hylobates", "Mandrillus")
+                 "Pongo", "Hylobates", "Mandrillus", "Colobus")
 
 pc_df <- pc_df %>%
   mutate(
@@ -183,14 +189,19 @@ hulls <- pc_df %>%
 ## ---------------------------------------------------------
 ## Plot
 ## ---------------------------------------------------------
-ggplot(pc_df, aes(PC1, PC2)) +
+# Separate fossil rows for starred points
+pc_df_fossils <- pc_df %>% filter(fossil_status != "Extant")
+pc_df_extant  <- pc_df %>% filter(fossil_status == "Extant")
+
+PCA_plot <- ggplot(pc_df, aes(PC1, PC2)) +
 
   ## Filled hulls
   geom_polygon(
     data = hulls,
     aes(fill = group, group = group),
     alpha = 0.15,
-    color = NA
+    color = NA,
+    show.legend = FALSE
   ) +
 
   ## Hull outlines (closed)
@@ -198,62 +209,589 @@ ggplot(pc_df, aes(PC1, PC2)) +
     data = hulls,
     aes(color = group, group = group),
     fill = NA,
-    linewidth = 0.8
+    linewidth = 0.8,
+    show.legend = FALSE
   ) +
 
-  ## Points
+  ## Extant points only
   geom_point(
+    data = pc_df_extant,
     aes(color = group),
     size = 3
   ) +
 
+  ## Fossil points as stars
+  geom_point(
+    data = pc_df_fossils,
+    size = 4, shape = 20, color = "black",
+    show.legend = FALSE
+  ) +
+
   ## Fossil labels
   geom_text_repel(
-    data = pc_df %>% filter(fossil_status != "Extant"),
-    aes(label = group,
-        color = fossil_status),
+    data = pc_df_fossils,
+    aes(label = group, color = fossil_status),
     size = 3.5,
     show.legend = FALSE
   ) +
 
-  ## Manual fossil colors
   scale_color_manual(
     values = c(
       "Ardipithecus" = "red3",
       "Other Fossil" = "black",
-      "Gorilla" = "#1b9e77",
+      "Gorilla"      = "#1b9e77",
       "Homo sapiens" = "#d95f02",
-      "Pan" = "#7570b3",
-      "Pongo" = "#e7298a",
-      "Hylobates" = "#66a61e",
-      "Mandrillus" = "#a6761d"
-    )
+      "Pan"          = "#7570b3",
+      "Pongo"        = "#e7298a",
+      "Hylobates"    = "#66a61e",
+      "Mandrillus"   = "#a6761d",
+      "Colobus"      = "blue"
+    ),
+    breaks = extant_taxa,  # only extant taxa appear in legend
+    name   = "Taxon"
   ) +
 
   scale_fill_manual(
     values = c(
-      "Gorilla" = "#1b9e77",
+      "Gorilla"      = "#1b9e77",
       "Homo sapiens" = "#d95f02",
-      "Pan" = "#7570b3",
-      "Pongo" = "#e7298a",
-      "Hylobates" = "#66a61e",
-      "Mandrillus" = "#a6761d"
-    )
+      "Pan"          = "#7570b3",
+      "Pongo"        = "#e7298a",
+      "Hylobates"    = "#66a61e",
+      "Mandrillus"   = "#a6761d",
+      "Colobus"      = "blue"
+    ),
+    guide = "none"
   ) +
+
   coord_equal() +
   theme_classic() +
   theme(legend.position = "right")
+
+print(PCA_plot)
+
+ggsave("PCA_plot.pdf", plot = PCA_plot, width = 9, height = 7)
+ggsave("PCA_plot.png", plot = PCA_plot, width = 9, height = 7, dpi = 200)
 ```
 
 ```{r}
-extant_taxa <- c("Gorilla", "Homo sapiens", "Pan", 
-                 "Pongo", "Hylobates", "Mandrillus")
+# ------------------------------------------------------------
+# LDA: Build shape matrix from GPA coords
+# ------------------------------------------------------------
 
-pca_df <- pca$x |> mutate(
-    fossil_status = case_when(
-      group %in% extant_taxa ~ "Extant",
-      group == "Ardipithecus" ~ "Ardipithecus",
-      TRUE ~ "Other Fossil"
+# Two-book landmark coords into a 2D matrix (specimens x variables)
+shape_matrix <- two.d.array(gpa$coords)   # n x (p*k)
+
+# Specimen labels come from wide_df (same order as land_array)
+specimen_labels <- wide_df$specimen
+
+# ------------------------------------------------------------
+# Define extant vs fossil
+# ------------------------------------------------------------
+extant_taxa <- c("Gorilla", "Pan", "Pongo", "Mandrillus", "Homo sapiens", "Hylobates", "Colobus")
+
+is_extant    <- specimen_labels %in% extant_taxa
+extant_mat   <- shape_matrix[is_extant, ]
+extant_grp   <- factor(specimen_labels[is_extant])
+
+fossil_mat   <- shape_matrix[!is_extant, ]
+fossil_names <- specimen_labels[!is_extant]
+
+cat("Extant specimens (n =", nrow(extant_mat), "):\n")
+print(table(extant_grp))
+cat("\nFossil specimens (n =", nrow(fossil_mat), "):\n")
+print(fossil_names)
+
+# ------------------------------------------------------------
+# LDA on extant taxa
+# ------------------------------------------------------------
+lda_model <- lda(extant_mat, grouping = extant_grp, CV = FALSE)
+
+# Cross-validated accuracy on extant sample
+lda_cv   <- lda(extant_mat, grouping = extant_grp, CV = TRUE)
+cv_table <- table(Predicted = lda_cv$class, Actual = extant_grp)
+
+cat("\n--- Cross-validated classification table (extant taxa) ---\n")
+print(cv_table)
+cat("\nOverall CV accuracy:", round(mean(lda_cv$class == extant_grp) * 100, 1), "%\n")
+
+# LD scores for extant specimens
+extant_scores <- predict(lda_model, extant_mat)
+ld_df_extant  <- data.frame(
+  Specimen = specimen_labels[is_extant],
+  Group    = extant_grp,
+  as.data.frame(extant_scores$x)
+)
+
+# ------------------------------------------------------------
+# Predict fossil classification
+# ------------------------------------------------------------
+fossil_pred <- predict(lda_model, fossil_mat)
+
+fossil_results <- data.frame(
+  Specimen        = fossil_names,
+  Predicted_Group = fossil_pred$class,
+  round(fossil_pred$posterior, 4)
+)
+
+cat("\n--- Fossil specimen predictions ---\n")
+print(fossil_results)
+
+# ------------------------------------------------------------
+# Plot LD1 vs LD2
+# ------------------------------------------------------------
+# ------------------------------------------------------------
+# Plot LD1 vs LD2
+# ------------------------------------------------------------
+
+# Add fossil_status for label colouring (mirrors PCA chunk)
+ld_df_extant <- ld_df_extant %>%
+  mutate(fossil_status = "Extant")
+
+ld_df_fossil <- data.frame(
+  Specimen = fossil_names,
+  Group    = fossil_names,
+  fossil_status = case_when(
+    fossil_names == "Ardipithecus" ~ "Ardipithecus",
+    TRUE ~ "Other Fossil"
+  ),
+  as.data.frame(fossil_pred$x)
+)
+
+ld_df_all <- bind_rows(ld_df_extant, ld_df_fossil)
+
+# Closed convex hulls for extant taxa (mirrors PCA chunk)
+hulls_lda <- ld_df_extant %>%
+  group_by(Group) %>%
+  filter(n() >= 3) %>%
+  group_modify(~{
+    h <- .x[chull(.x$LD1, .x$LD2), , drop = FALSE]
+    rbind(h, h[1, , drop = FALSE])
+  }) %>%
+  ungroup()
+
+# Plot
+lda_plot <- ggplot(ld_df_all, aes(LD1, LD2)) +
+
+  ## Filled hulls
+  geom_polygon(
+    data = hulls_lda,
+    aes(fill = Group, group = Group),
+    alpha = 0.15,
+    color = NA,
+    show.legend = FALSE
+  ) +
+
+  ## Hull outlines (closed)
+  geom_polygon(
+    data = hulls_lda,
+    aes(color = Group, group = Group),
+    fill = NA,
+    linewidth = 0.8,
+    show.legend = FALSE
+  ) +
+
+  ## Extant points
+  geom_point(
+    data = ld_df_extant,
+    aes(color = Group),
+    size = 3
+  ) +
+
+  ## Fossil points (excluded from legend)
+  geom_point(
+    data = ld_df_fossil,
+    size = 4, shape = 20, color = "black",
+    show.legend = FALSE
+  ) +
+
+  ## Fossil labels
+  geom_text_repel(
+    data = ld_df_fossil,
+    aes(label = Group, color = fossil_status),
+    size = 3.5,
+    show.legend = FALSE
+  ) +
+
+  scale_color_manual(
+    values = c(
+      "Ardipithecus" = "red3",
+      "Other Fossil" = "black",
+      "Gorilla"      = "#1b9e77",
+      "Homo sapiens" = "#d95f02",
+      "Pan"          = "#7570b3",
+      "Pongo"        = "#e7298a",
+      "Hylobates"    = "#66a61e",
+      "Mandrillus"   = "#a6761d",
+      "Colobus"      = "blue"
+    ),
+    breaks = extant_taxa,  # only show extant taxa in legend
+    name   = "Taxon"
+  ) +
+
+  scale_fill_manual(
+    values = c(
+      "Gorilla"      = "#1b9e77",
+      "Homo sapiens" = "#d95f02",
+      "Pan"          = "#7570b3",
+      "Pongo"        = "#e7298a",
+      "Hylobates"    = "#66a61e",
+      "Mandrillus"   = "#a6761d",
+      "Colobus"      = "blue"
+    ),
+    guide = "none"  # suppress fill legend
+  ) +
+
+  coord_equal() +
+  theme_classic() +
+  theme(legend.position = "right")
+
+print(lda_plot)
+
+ggsave("LDA_plot.pdf", plot = lda_plot, width = 9, height = 7)
+ggsave("LDA_plot.png", plot = lda_plot, width = 9, height = 7, dpi = 200)
+
+# ------------------------------------------------------------
+# Save results
+# ------------------------------------------------------------
+write.csv(fossil_results, "fossil_LDA_predictions.csv", row.names = FALSE)
+
+cat("\nDone! Outputs: LDA_plot.pdf/.png, fossil_LDA_predictions.csv\n")
+```
+#Cross validated DFA
+```{r}
+# ------------------------------------------------------------
+# Cross-validated DFA
+# ------------------------------------------------------------
+
+# Leave-one-out cross-validation (built into lda)
+lda_cv  <- lda(extant_mat, grouping = extant_grp, CV = TRUE)
+
+# Confusion matrix
+cv_table <- table(Predicted = lda_cv$class, Actual = extant_grp)
+cat("\n--- Cross-validated confusion matrix ---\n")
+print(cv_table)
+
+# Overall accuracy
+cv_accuracy <- mean(lda_cv$class == extant_grp) * 100
+cat("\nOverall LOO-CV accuracy:", round(cv_accuracy, 1), "%\n")
+
+# Per-group accuracy
+per_group_acc <- diag(cv_table) / colSums(cv_table) * 100
+cat("\nPer-group LOO-CV accuracy (%):\n")
+print(round(per_group_acc, 1))
+
+# ------------------------------------------------------------
+# Format confusion matrix as a clean data frame and save
+# ------------------------------------------------------------
+cv_table_df <- as.data.frame.matrix(cv_table)
+
+# Add correct classification % as a final column
+cv_table_df$Correct_pct <- round(diag(cv_table) / colSums(cv_table) * 100, 1)
+
+cat("\n--- Confusion matrix with per-group accuracy ---\n")
+print(cv_table_df)
+
+write.csv(cv_table_df, "DFA_CV_confusion_matrix.csv", row.names = TRUE)
+
+# ------------------------------------------------------------
+# Posterior probability summary for extant specimens
+# ------------------------------------------------------------
+extant_cv_posteriors <- as.data.frame(lda_cv$posterior)
+extant_cv_posteriors$Specimen      <- specimen_labels[is_extant]
+extant_cv_posteriors$Actual_Group  <- extant_grp
+extant_cv_posteriors$Predicted_Group <- lda_cv$class
+extant_cv_posteriors$Correct       <- lda_cv$class == extant_grp
+
+# Reorder columns
+extant_cv_posteriors <- extant_cv_posteriors %>%
+  dplyr::select(Specimen, Actual_Group, Predicted_Group, Correct, everything())
+
+cat("\n--- CV posterior probabilities (extant specimens) ---\n")
+print(extant_cv_posteriors)
+
+write.csv(extant_cv_posteriors, "DFA_CV_posteriors_extant.csv", row.names = FALSE)
+
+cat("\nDone! Outputs: DFA_CV_confusion_matrix.csv, DFA_CV_posteriors_extant.csv\n")
+```
+
+```{r}
+# ------------------------------------------------------------
+# Fossil predictions from cross-validated DFA
+# ------------------------------------------------------------
+
+# We can't directly get LOO-CV predictions for fossils since they
+# aren't part of the training set. Instead we use k-fold CV:
+# train on all extant, predict fossils — this is already the most
+# valid approach since fossils are truly unknown specimens.
+# We augment this with a jackknife uncertainty estimate below.
+
+# Standard fossil predictions (already computed above)
+fossil_results <- data.frame(
+  Specimen        = fossil_names,
+  Predicted_Group = fossil_pred$class,
+  round(fossil_pred$posterior, 4)
+)
+
+# ------------------------------------------------------------
+# Jackknife uncertainty: retrain LDA leaving one extant
+# specimen out at a time, predict fossils each time,
+# summarise stability of fossil classifications
+# ------------------------------------------------------------
+n_extant <- nrow(extant_mat)
+# Store predicted class for each fossil at each jackknife iteration
+jack_classes <- matrix(NA, nrow = length(fossil_names), ncol = n_extant,
+                       dimnames = list(fossil_names, NULL))
+
+for (j in seq_len(n_extant)) {
+  train_mat <- extant_mat[-j, ]
+  train_grp <- extant_grp[-j]
+
+  # skip if any group drops to 1 specimen (lda will fail)
+  if (any(table(train_grp) < 2)) next
+
+  jack_mod        <- lda(train_mat, grouping = train_grp, CV = FALSE)
+  jack_pred       <- predict(jack_mod, fossil_mat)
+  jack_classes[, j] <- as.character(jack_pred$class)
+}
+
+# For each fossil: count how often each group was predicted
+jack_summary <- lapply(seq_along(fossil_names), function(i) {
+  counts <- table(factor(jack_classes[i, ], levels = levels(extant_grp)))
+  pct    <- round(counts / sum(!is.na(jack_classes[i, ])) * 100, 1)
+  as.data.frame(t(as.numeric(pct)), col.names = paste0(names(pct), "_jack_pct")) %>%
+    setNames(paste0(levels(extant_grp), "_jack_pct"))
+}) %>%
+  bind_rows() %>%
+  mutate(Specimen = fossil_names, .before = 1)
+
+# Dominant jackknife prediction (most frequent group)
+jack_summary <- jack_summary %>%
+  mutate(
+    Jack_Predicted = apply(jack_classes, 1, function(x) {
+      tab <- table(x)
+      names(tab)[which.max(tab)]
+    }),
+    Jack_Stability_pct = apply(jack_classes, 1, function(x) {
+      tab <- table(x)
+      round(max(tab) / sum(!is.na(x)) * 100, 1)
+    })
+  ) %>%
+  dplyr::select(Specimen, Jack_Predicted, Jack_Stability_pct, everything())
+
+cat("\n--- Jackknife stability of fossil predictions ---\n")
+print(jack_summary)
+
+# ------------------------------------------------------------
+# Combine standard predictions + jackknife stability
+# ------------------------------------------------------------
+fossil_full_results <- fossil_results %>%
+  left_join(jack_summary %>% dplyr::select(Specimen, Jack_Predicted, Jack_Stability_pct),
+            by = "Specimen")
+
+cat("\n--- Full fossil prediction table (posterior + jackknife) ---\n")
+print(fossil_full_results)
+
+write.csv(fossil_full_results, "fossil_DFA_predictions_CV.csv", row.names = FALSE)
+write.csv(jack_summary,        "fossil_DFA_jackknife.csv",      row.names = FALSE)
+
+cat("\nDone! Outputs: fossil_DFA_predictions_CV.csv, fossil_DFA_jackknife.csv\n")
+```
+
+#Ardipithecus wireframe
+```{r}
+# ------------------------------------------------------------
+# Wireframe for Ardipithecus
+# ------------------------------------------------------------
+
+# Define links between landmarks (edit pairs to match your anatomy)
+# Each row is a pair of landmark numbers to connect with a line
+# Based on 19 landmarks (after removing LM14 and LM21)
+landmark_links <- matrix(c(
+  1,2,
+  2,3,
+  3,4,
+  4,5,
+  5,6,
+  6,7,
+  7,8,
+  8,9,
+  8,1,
+  9,1,
+  9,2,
+  9,3,
+  9,4,
+  9,5,
+  9,6,
+  9,7,
+  2,10,
+  10,11,
+  11,4,
+  8,12,
+  12,13,
+  13,6,
+  1,14,
+  14,15,
+  15,16,
+  16,17,
+  4,18,
+  18,5,
+  5,19,
+  19,6,
+  14,17), ncol = 2, byrow = TRUE)
+
+# ------------------------------------------------------------
+# Get mean shape of extant taxa for comparison
+# ------------------------------------------------------------
+mean_shapes <- lapply(extant_taxa, function(tax) {
+  idx <- which(specimen_labels == tax)
+  if (length(idx) == 0) return(NULL)
+  mshape(gpa$coords[, , idx, drop = FALSE])
+})
+names(mean_shapes) <- extant_taxa
+
+# Overall extant consensus
+extant_idx     <- which(specimen_labels %in% extant_taxa)
+extant_consensus <- mshape(gpa$coords[, , extant_idx])
+
+# ------------------------------------------------------------
+# Get Ardipithecus shape
+# ------------------------------------------------------------
+ardi_idx   <- which(specimen_labels == "Ardipithecus")
+
+if (length(ardi_idx) == 0) stop("No specimen labelled 'Ardipithecus' found.")
+
+# If multiple Ardipithecus specimens, use their mean
+ardi_shape <- if (length(ardi_idx) > 1) {
+  mshape(gpa$coords[, , ardi_idx])
+} else {
+  gpa$coords[, , ardi_idx]
+}
+
+# ------------------------------------------------------------
+# Plot 1: Ardipithecus shape alone
+# ------------------------------------------------------------
+pdf("wireframe_Ardipithecus.pdf", width = 7, height = 7)
+plotRefToTarget(
+  ardi_shape,
+  ardi_shape,
+  mag      = 1,
+  method   = "TPS",
+  links    = landmark_links,
+  gridPars = gridPar(pt.bg = "red3", pt.size = 1.5, link.col = "red3")
+)
+title("Ardipithecus — landmark configuration")
+dev.off()
+
+# ------------------------------------------------------------
+# Plot 2: Ardipithecus vs extant consensus (TPS deformation grid)
+# ------------------------------------------------------------
+pdf("wireframe_Ardipithecus_vs_consensus.pdf", width = 7, height = 7)
+plotRefToTarget(
+  extant_consensus,
+  ardi_shape,
+  mag      = 2,        # magnify differences x2 for visibility
+  method   = "TPS",
+  links    = landmark_links,
+  gridPars = gridPar(
+    pt.bg    = "red3",
+    pt.size  = 1.5,
+    link.col = "red3",
+    grid.col = "grey70"
+  )
+)
+title("Ardipithecus vs extant consensus (TPS, 2x magnification)")
+dev.off()
+
+# ------------------------------------------------------------
+# Plot 3: Ardipithecus vs each extant taxon mean (panel)
+# ------------------------------------------------------------
+pdf("wireframe_Ardipithecus_vs_extant.pdf", width = 14, height = 9)
+par(mfrow = c(2, 3), mar = c(2, 2, 3, 1))
+
+for (tax in extant_taxa) {
+  if (is.null(mean_shapes[[tax]])) next
+  plotRefToTarget(
+    mean_shapes[[tax]],
+    ardi_shape,
+    mag      = 2,
+    method   = "TPS",
+    links    = landmark_links,
+    gridPars = gridPar(
+      pt.bg    = "red3",
+      pt.size  = 1.2,
+      link.col = "red3",
+      grid.col = "grey70"
     )
   )
+  title(paste("Ardipithecus vs", tax, "(2x)"))
+}
+
+dev.off()
+
+cat("Wireframe plots saved:\n",
+    "  wireframe_Ardipithecus.pdf\n",
+    "  wireframe_Ardipithecus_vs_consensus.pdf\n",
+    "  wireframe_Ardipithecus_vs_extant.pdf\n")
+```
+
+#wireframe to ardi image
+```{r}
+## Plot Ardipithecus landmarks on the Ardi.png image
+## Assumes LandmarkDataCleaned.csv has: specimen, IMAGE, SCALE, LM01_x..LM21_x, LM01_y..LM21_y
+## Coordinate note: image y=0 is TOP, but ggplot y increases UP → we use scale_y_reverse().
+
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(png)      # readPNG()
+  library(grid)     # rasterGrob()
+})
+
+## -----------------------
+## paths (edit if needed)
+## -----------------------
+csv_path <- here("data", "clean", "LandmarkDataCleaned.csv")
+img_path <- here("Ardi.png")
+
+img <- readPNG(img_path)
+img_h <- dim(img)[1]
+img_w <- dim(img)[2]
+
+lm_raw <- read.csv(csv_path, stringsAsFactors = FALSE)
+
+ardi_row <- lm_raw %>%
+  filter(tolower(specimen) == "ardipithecus") %>%
+  filter(IMAGE == basename(img_path)) %>%
+  slice(1)
+
+stopifnot(nrow(ardi_row) == 1)
+
+scale_cm_per_px <- ardi_row$SCALE[1]  # assume: cm per pixel
+
+lm_df <- ardi_row %>%
+  pivot_longer(
+    cols = matches("^LM\\d{2}_[xy]$"),
+    names_to = c("LM", "axis"),
+    names_pattern = "^(LM\\d{2})_([xy])$",
+    values_to = "value"
+  ) %>%
+  pivot_wider(names_from = axis, values_from = value) %>%
+  mutate(
+    x = as.numeric(x),
+    y = as.numeric(y),
+    lm_num = as.integer(gsub("^LM", "", LM))
+  ) %>%
+  filter(!lm_num %in% c(14, 21))   # ← removes LM14 and LM21
+
+ArdiLandmarkplot <- ggplot() +
+  ## Place the image so y goes DOWN (top-left origin), matching TPSDig
+  annotation_raster(img, xmin = 0, xmax = img_w, ymin = img_h, ymax = 0) +
+  geom_point(data = lm_df, aes(x = x, y = y), color = "red", size = 3) +
+  geom_text(data = lm_df, aes(x = x, y = y, label = lm_num), color = "red", vjust = -0.8, size = 5) +
+  coord_fixed(xlim = c(0, img_w), ylim = c(0, img_h), expand = FALSE) +
+  theme_void()
+
+ArdiLandmarkplot
+
+ggsave("Ardilandmarkplot.pdf", plot = ArdiLandmarkplot, width = 9, height = 7)
 ```
